@@ -47,3 +47,13 @@ npm run dev
 ```
 
 立即测试（不等开抢）：`npm run test:now`
+
+## 抢购间隔
+
+在 `seckill/.env` 配置：
+
+```bash
+# 每次请求返回后等待多久再发下一枪（毫秒）；0=立即连续发
+ACQUIRE_INTERVAL_MS=1000
+```
+

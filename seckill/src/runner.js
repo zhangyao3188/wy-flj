@@ -22,12 +22,22 @@ const {
   normalizeLevel,
   waitUntil,
   readCookie,
+  sleep,
 } = require('./client');
 
 /** 开抢前多少毫秒开始发请求 */
 const FIRE_EARLY_MS = 100;
 /** 开抢前多少毫秒再预热一遍 */
 const WARMUP_BEFORE_MS = 30000;
+
+function resolveAcquireIntervalMs(options = {}) {
+  if (options.intervalMs != null && Number.isFinite(Number(options.intervalMs))) {
+    return Math.max(0, Number(options.intervalMs));
+  }
+  const fromEnv = Number(process.env.ACQUIRE_INTERVAL_MS);
+  if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv;
+  return 0;
+}
 
 function formatLeft(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -193,6 +203,7 @@ async function preparePayload(client, target, candidates, { allowBorrowStock = f
 async function fireLoop(client, ready, target, options = {}) {
   const tag = options.tag ? `[${options.tag}] ` : '';
   const maxAttempts = options.maxAttempts != null ? options.maxAttempts : Infinity;
+  const intervalMs = resolveAcquireIntervalMs(options);
   const jar = options.jar || null;
   const user = options.user || null;
   let attempt = 0;
@@ -250,26 +261,28 @@ async function fireLoop(client, ready, target, options = {}) {
           stopReason = 'session_expired';
           break;
         }
-        continue;
-      }
-
-      if (code === 803 || code === 825) {
+      } else if (code === 803 || code === 825) {
         try {
           const resp2 = await fetchShowingList(client);
           if (isSessionExpired(resp2)) {
             console.warn(`${tag}[seckill] 刷新 stockId 时会话过期(873)`);
-            continue;
-          }
-          const latest = findSamePeriod(resp2.result || resp2.data || resp2, target);
-          if (latest && latest.stockId) {
-            ready.stockId = latest.stockId;
-            console.log(`${tag}[seckill] 已更新 stockId=${ready.stockId}`);
+          } else {
+            const latest = findSamePeriod(resp2.result || resp2.data || resp2, target);
+            if (latest && latest.stockId) {
+              ready.stockId = latest.stockId;
+              console.log(`${tag}[seckill] 已更新 stockId=${ready.stockId}`);
+            }
           }
         } catch (_) {}
       }
     } catch (e) {
       const cost = Date.now() - t0;
       console.log(`${tag}[seckill] #${attempt} ${cost}ms ERROR ${e.message || e}`);
+    }
+
+    // 未停抢时，按配置间隔再发下一枪（ACQUIRE_INTERVAL_MS，单位毫秒）
+    if (!success && attempt < maxAttempts && intervalMs > 0) {
+      await sleep(intervalMs);
     }
   }
 
@@ -279,6 +292,7 @@ async function fireLoop(client, ready, target, options = {}) {
     elapsedMs: Date.now() - startedAt,
     target: ready,
     stopReason,
+    intervalMs,
   };
 }
 
@@ -421,6 +435,12 @@ async function runSeckill(mobile, options = {}) {
   console.log(
     `[seckill] 开始连续抢购${immediate ? '（测试立即模式）' : `（提前 ${fireEarlyMs}ms）`}…`
   );
+  const intervalMs = resolveAcquireIntervalMs(options);
+  if (intervalMs > 0) {
+    console.log(`[seckill] 轮询间隔 ACQUIRE_INTERVAL_MS=${intervalMs}ms`);
+  } else {
+    console.log('[seckill] 轮询间隔 0（请求返回后立即下一发）');
+  }
 
   const result = await fireLoop(account.client, account.ready, account.target, {
     ...options,
@@ -441,6 +461,7 @@ module.exports = {
   warmupSession,
   fireLoop,
   formatLeft,
+  resolveAcquireIntervalMs,
   FIRE_EARLY_MS,
   WARMUP_BEFORE_MS,
 };

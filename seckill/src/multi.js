@@ -11,6 +11,7 @@ const {
   warmupSession,
   fireLoop,
   formatLeft,
+  resolveAcquireIntervalMs,
   FIRE_EARLY_MS,
   WARMUP_BEFORE_MS,
 } = require('./runner');
@@ -51,7 +52,10 @@ async function runMulti(options = {}) {
   console.log('==============================');
   console.log(`[dev] 账号数=${mobiles.length}${immediate ? ' [测试立即抢]' : ''}`);
   console.log(`[dev] 账号: ${mobiles.join(', ')}`);
-  console.log(`[dev] 启动预热 + 开抢前 ${warmupBeforeMs / 1000}s 再预热；成功即停该账号`);
+  const intervalMs = resolveAcquireIntervalMs(options);
+  console.log(
+    `[dev] 启动预热 + 开抢前 ${warmupBeforeMs / 1000}s 再预热；成功即停该账号；轮询间隔=${intervalMs}ms`
+  );
   console.log('');
 
   const prepared = [];
