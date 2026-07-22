@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>完成登录</title>
+  <style>
+    :root {
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --text: #1f2a37;
+      --muted: #667085;
+      --line: #e4e7ec;
+      --accent: #e60012;
+      --ok: #12b76a;
+      --err: #d92d20;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 12px 12px 20px;
+    }
+    .toolbar {
+      width: 100%;
+      max-width: 480px;
+      margin: 0 auto 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .status {
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.45;
+      padding: 10px 12px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .status.ok { color: var(--ok); border-color: #abefc6; background: #f6fef9; }
+    .status.err { color: var(--err); border-color: #fecdca; background: #fffbfa; }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    input[type="text"] {
+      flex: 1;
+      min-width: 0;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+      font-size: 16px; /* 避免 iOS 自动放大 */
+      min-height: 48px;
+    }
+    button {
+      flex: 0 0 auto;
+      padding: 0 16px;
+      border: 0;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      min-height: 48px;
+      min-width: 64px;
+    }
+    button.secondary {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    .screen-wrap {
+      width: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 8px 28px rgba(31, 42, 55, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #frame {
+      width: 100%;
+      height: auto;
+      max-height: min(78vh, 844px);
+      cursor: pointer;
+      display: block;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+      object-fit: contain;
+      object-position: center top;
+      background: #f0f2f5;
+    }
+    .tip {
+      max-width: 480px;
+      margin: 10px auto 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.5;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div class="status" id="status">加载中…</div>
+    <div class="row">
+      <input id="typeBox" type="text" placeholder="先点画面输入框，再在此输入文字" inputmode="text" />
+      <button id="sendType" type="button">输入</button>
+      <button id="sendClear" type="button" class="secondary">清空</button>
+      <button id="sendEnter" type="button" class="secondary">回车</button>
+    </div>
+  </div>
+  <div class="screen-wrap">
+    <img id="frame" alt="登录画面" draggable="false" />
+  </div>
+  <p class="tip">输错了：再点一下该输入框 → 点「清空」→ 重新输入后点「输入」（会覆盖原内容）。</p>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const token = params.get('token');
+    const statusEl = document.getElementById('status');
+    const frame = document.getElementById('frame');
+    const typeBox = document.getElementById('typeBox');
+
+    if (!token) {
+      statusEl.className = 'status err';
+      statusEl.textContent = '缺少 token';
+    }
+
+    function refreshFrame() {
+      frame.src = '/api/login/session/' + token + '/frame?t=' + Date.now();
+    }
+
+    function mapPoint(ev) {
+      const rect = frame.getBoundingClientRect();
+      const clientX = ev.touches ? ev.touches[0].clientX : ev.clientX;
+      const clientY = ev.touches ? ev.touches[0].clientY : ev.clientY;
+      const nw = frame.naturalWidth || rect.width;
+      const nh = frame.naturalHeight || rect.height;
+      // object-fit: contain 时计算内容区域偏移
+      const scale = Math.min(rect.width / nw, rect.height / nh);
+      const dispW = nw * scale;
+      const dispH = nh * scale;
+      const offsetX = (rect.width - dispW) / 2;
+      const offsetY = (rect.height - dispH) / 2;
+      const x = Math.round((clientX - rect.left - offsetX) / scale);
+      const y = Math.round((clientY - rect.top - offsetY) / scale);
+      return {
+        x: Math.max(0, Math.min(nw - 1, x)),
+        y: Math.max(0, Math.min(nh - 1, y)),
+      };
+    }
+
+    async function pollStatus() {
+      try {
+        const res = await fetch('/api/login/session/' + token);
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.message || '会话无效');
+        if (data.status === 'success') {
+          statusEl.className = 'status ok';
+          statusEl.textContent =
+            '登录成功：' +
+            (data.mobile || '') +
+            '（' +
+            ((data.account && data.account.vipLevel) || '') +
+            '）已写入数据库，可关闭本页';
+          return true;
+        }
+        if (data.status === 'failed' || data.status === 'expired') {
+          statusEl.className = 'status err';
+          statusEl.textContent = data.message || data.status;
+          return true;
+        }
+        statusEl.className = 'status';
+        statusEl.textContent = data.message || data.status || '请在画面中操作';
+      } catch (e) {
+        statusEl.className = 'status err';
+        statusEl.textContent = e.message || String(e);
+      }
+      return false;
+    }
+
+    async function sendClick(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const src = ev.changedTouches ? ev.changedTouches[0] : ev;
+      const { x, y } = mapPoint(src);
+      statusEl.className = 'status';
+      statusEl.textContent = '点击中… (' + x + ', ' + y + ')';
+      try {
+        const res = await fetch('/api/login/session/' + token + '/input', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'click', x, y }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          throw new Error(data.message || '点击失败');
+        }
+        statusEl.textContent = '已点击输入区域，可在上方输入后点「输入」';
+      } catch (e) {
+        statusEl.className = 'status err';
+        statusEl.textContent = e.message || String(e);
+      }
+      refreshFrame();
+    }
+
+    // 只用 pointerup，避免 touchend + click 各触发一次导致焦点被立刻点丢
+    let lastPointer = 0;
+    frame.addEventListener(
+      'pointerup',
+      (ev) => {
+        if (ev.button != null && ev.button !== 0) return;
+        const now = Date.now();
+        if (now - lastPointer < 350) return;
+        lastPointer = now;
+        sendClick(ev);
+      },
+      { passive: false }
+    );
+
+    async function sendType() {
+      const text = typeBox.value;
+      if (!text) return;
+      await fetch('/api/login/session/' + token + '/input', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'type', text, replace: true }),
+      });
+      typeBox.value = '';
+      statusEl.className = 'status';
+      statusEl.textContent = '已写入（覆盖）当前输入框';
+      refreshFrame();
+    }
+
+    async function sendClear() {
+      await fetch('/api/login/session/' + token + '/input', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'clear' }),
+      });
+      statusEl.className = 'status';
+      statusEl.textContent = '已清空当前输入框，可重新输入';
+      refreshFrame();
+    }
+
+    document.getElementById('sendType').addEventListener('click', sendType);
+    document.getElementById('sendClear').addEventListener('click', sendClear);
+    document.getElementById('sendEnter').addEventListener('click', async () => {
+      await fetch('/api/login/session/' + token + '/input', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'press', key: 'Enter' }),
+      });
+      refreshFrame();
+    });
+    typeBox.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendType();
+    });
+
+    refreshFrame();
+    setInterval(refreshFrame, 700);
+    (async function loop() {
+      for (;;) {
+        const done = await pollStatus();
+        if (done) break;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    })();
+  </script>
+</body>
+</html>

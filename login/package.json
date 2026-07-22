@@ -1,0 +1,25 @@
+{
+  "name": "wy-flj-login",
+  "version": "1.0.0",
+  "description": "福利金在线登录（含门户页面，登录后写入 MySQL）",
+  "main": "src/webServer.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/webServer.js",
+    "dev": "node src/webServer.js",
+    "init-db": "node src/init-db.js",
+    "local": "node src/index.js",
+    "api": "node src/apiServer.js",
+    "import": "node src/importCapture.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "axios-cookiejar-support": "^4.0.7",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "mysql2": "^3.23.1",
+    "playwright": "^1.61.1",
+    "tough-cookie": "^4.1.4",
+    "uuid": "^9.0.1"
+  }
+}

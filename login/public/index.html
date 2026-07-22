@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>福利金登录</title>
+  <style>
+    :root {
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --text: #1f2a37;
+      --muted: #667085;
+      --line: #e4e7ec;
+      --accent: #e60012;
+      --accent-soft: #fff1f0;
+      --ok: #12b76a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(900px 420px at 100% -10%, #ffe8e6 0%, transparent 55%),
+        radial-gradient(700px 360px at -10% 110%, #e8f1ff 0%, transparent 50%),
+        var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 16px;
+    }
+    .panel {
+      width: min(440px, 100%);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 28px 22px;
+      box-shadow: 0 12px 40px rgba(31, 42, 55, 0.08);
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-bottom: 14px;
+    }
+    h1 { margin: 0 0 10px; font-size: 1.55rem; letter-spacing: 0.01em; }
+    p { color: var(--muted); line-height: 1.65; margin: 0 0 22px; font-size: 0.95rem; }
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 12px;
+      padding: 15px 16px;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #fff;
+      background: linear-gradient(135deg, #ff3b30, #e60012);
+      cursor: pointer;
+      min-height: 52px;
+    }
+    button:disabled { opacity: 0.65; cursor: wait; }
+    .hint { margin-top: 14px; font-size: 0.9rem; color: var(--muted); word-break: break-all; }
+    .err { color: #d92d20; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="brand">福利金账号</div>
+    <h1>登录网易账号</h1>
+    <p>点击下方按钮开始。将打开官方登录画面，请输入手机号与验证码；若出现滑块，请在画面中完成。登录成功后自动保存，可用于抢购。</p>
+    <button id="btn" type="button">开始登录</button>
+    <div class="hint" id="msg"></div>
+  </div>
+  <script>
+    const btn = document.getElementById('btn');
+    const msg = document.getElementById('msg');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      msg.className = 'hint';
+      msg.textContent = '正在创建登录会话…';
+      try {
+        const res = await fetch('/api/login/session', { method: 'POST' });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.message || '创建失败');
+        location.href = data.url;
+      } catch (e) {
+        msg.className = 'hint err';
+        msg.textContent = e.message || String(e);
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
