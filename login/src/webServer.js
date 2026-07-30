@@ -102,6 +102,7 @@ app.get('/api/accounts', async (_req, res) => {
         mobile: a.mobile,
         nickname: a.nickname,
         vipLevel: a.vipLevel,
+        successCount: a.successCount || 0,
         loggedInAt: a.loggedInAt,
         updatedAt: a.updatedAt,
       })),

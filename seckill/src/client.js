@@ -9,9 +9,23 @@ const { v4: uuidv4 } = require('uuid');
 const PAY_ORIGIN = 'https://pay.ds.163.com';
 const PAY_API = 'https://pay-api.ds.163.com';
 const INF = 'https://inf.ds.163.com';
+const INF_ACT = 'https://inf-act.ds.163.com';
+/** 活动 actInfo 用于取 currentTime（任意登录账号可调） */
+const ACT_INFO_ID = process.env.ACT_ID || '656d6d6b6085e70001ac05df';
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 const LOG_DIR = path.resolve(__dirname, '../log');
+
+/** serverTime ≈ Date.now() + serverOffsetMs */
+let serverOffsetMs = 0;
+
+function nowMs() {
+  return Date.now() + serverOffsetMs;
+}
+
+function getServerOffsetMs() {
+  return serverOffsetMs;
+}
 
 function ensureLogDir() {
   if (!fs.existsSync(LOG_DIR)) {
@@ -331,8 +345,59 @@ function toMs(ts) {
 }
 
 function normalizeLevel(level) {
-  const s = String(level || 'V1').toUpperCase();
+  if (level == null || level === '') return 'V1';
+  const s = String(level).trim().toUpperCase();
+  if (/^V\d+$/.test(s)) return s;
+  const m = s.match(/(\d+)/);
+  if (m) return `V${m[1]}`;
   return s.startsWith('V') ? s : `V${s}`;
+}
+
+function levelRank(level) {
+  const m = String(normalizeLevel(level)).match(/V?(\d+)/i);
+  return m ? Number(m[1]) : 0;
+}
+
+/** POST /v1/web/exp/xy/user/get-info → 账号最大可抢档位 currentLv */
+async function fetchXyUserInfo(client) {
+  const res = await client.post(`${INF}/v1/web/exp/xy/user/get-info`, {});
+  return res.data;
+}
+
+function parseCurrentLv(vipData) {
+  if (!vipData || typeof vipData !== 'object') return null;
+  const result = vipData.result || vipData.data || vipData;
+  const raw =
+    result.currentLv ||
+    result.maxLv ||
+    result.level ||
+    result.vipLevel ||
+    (result.user && (result.user.currentLv || result.user.level)) ||
+    null;
+  return raw != null && raw !== '' ? normalizeLevel(raw) : null;
+}
+
+/**
+ * 解析账号最大档位：优先 get-info.currentLv；
+ * 若列表里有不超过该等级的券，取其中最高档（通常等于 currentLv）。
+ */
+function resolveMaxVipLevel(vipData, listResult, fallback) {
+  const fromApi = parseCurrentLv(vipData);
+  let level = fromApi || (fallback ? normalizeLevel(fallback) : null);
+  if (!level) level = 'V1';
+
+  const coupons =
+    (listResult && (listResult.coupons || listResult.list || listResult.items)) || [];
+  if (coupons.length && fromApi) {
+    const maxAllowed = levelRank(fromApi);
+    let best = 0;
+    for (const c of coupons) {
+      const r = levelRank(c.xyLevel || c.vipLevel || c.level);
+      if (r > 0 && r <= maxAllowed && r > best) best = r;
+    }
+    if (best > 0) level = `V${best}`;
+  }
+  return normalizeLevel(level);
 }
 
 function collectLevelCandidates(listResult, vipLevel) {
@@ -368,7 +433,7 @@ function collectLevelCandidates(listResult, vipLevel) {
  * 按会员等级选品：
  * 取该等级下全部 NOT_STARTED，选 seckillStartTime 最近（即将开抢）的一场预备。
  */
-function pickTargetByVip(listResult, vipLevel, nowMs = Date.now()) {
+function pickTargetByVip(listResult, vipLevel, nowMsArg = nowMs()) {
   const level = normalizeLevel(vipLevel);
   const candidates = collectLevelCandidates(listResult, level);
 
@@ -393,7 +458,7 @@ function pickTargetByVip(listResult, vipLevel, nowMs = Date.now()) {
   }
 
   const upcoming = notStarted
-    .filter((c) => Number.isFinite(c.seckillStartTime) && c.seckillStartTime >= nowMs - 1000)
+    .filter((c) => Number.isFinite(c.seckillStartTime) && c.seckillStartTime >= nowMsArg - 1000)
     .sort((a, b) => a.seckillStartTime - b.seckillStartTime);
 
   if (upcoming.length) {
@@ -441,17 +506,80 @@ async function acquire(client, { couponId, stockId }) {
   return res.data;
 }
 
+/**
+ * 同步服务器时间：POST inf-act .../actInfo → result.currentTime
+ * 之后用 nowMs() 代替 Date.now() 做倒计时/开火。
+ */
+async function syncServerTime(client) {
+  const localBefore = Date.now();
+  const res = await client.post(`${INF_ACT}/v1/act-web/module/common/actInfo`, {
+    actId: ACT_INFO_ID,
+  });
+  const localAfter = Date.now();
+  const data = res.data || {};
+  const result = data.result || data.data || {};
+  const currentTime = Number(result.currentTime);
+  if (!Number.isFinite(currentTime)) {
+    throw new Error(`actInfo 未返回 currentTime: ${JSON.stringify(data).slice(0, 200)}`);
+  }
+  const localMid = Math.floor((localBefore + localAfter) / 2);
+  serverOffsetMs = currentTime - localMid;
+  return {
+    currentTime,
+    serverOffsetMs,
+    rttMs: localAfter - localBefore,
+    localNow: localAfter,
+    serverNow: nowMs(),
+  };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitUntil(targetMs, { label = '开抢', onTick } = {}) {
+/** 毫秒倒计时文案：9.876s */
+function formatCountdownMs(ms) {
+  const total = Math.max(0, Math.ceil(ms));
+  const sec = Math.floor(total / 1000);
+  const milli = total % 1000;
+  return `${sec}.${String(milli).padStart(3, '0')}s`;
+}
+
+/**
+ * 等到目标时刻（默认按校准后的服务器时间）。
+ * 距目标 ≤ countdownLastMs（默认 10s）时，同行刷新毫秒倒计时。
+ */
+async function waitUntil(
+  targetMs,
+  {
+    label = '开抢',
+    onTick,
+    nowFn = nowMs,
+    countdownLastMs = 10000,
+    quiet = false,
+  } = {}
+) {
+  let printedCountdown = false;
   for (;;) {
-    const left = targetMs - Date.now();
-    if (left <= 0) return;
-    if (typeof onTick === 'function') onTick(left);
-    // 距开抢越近，醒来越勤
-    const step = left > 60000 ? 10000 : left > 5000 ? 1000 : left > 200 ? 50 : left;
+    const now = nowFn();
+    const left = targetMs - now;
+    if (left <= 0) {
+      if (printedCountdown && !quiet) process.stdout.write('\n');
+      return;
+    }
+    if (typeof onTick === 'function') onTick(left, now);
+
+    if (left <= countdownLastMs) {
+      if (!quiet) {
+        process.stdout.write(`\r[${label}] 倒计时 ${formatCountdownMs(left)}   `);
+        printedCountdown = true;
+      }
+      // 末段尽量密：约 1 帧刷新
+      await sleep(left > 32 ? 16 : Math.max(1, left));
+      continue;
+    }
+
+    const step = left > 60000 ? 10000 : left > 15000 ? 1000 : left > 200 ? 50 : left;
     await sleep(Math.max(10, step));
   }
 }
@@ -466,14 +594,23 @@ module.exports = {
   isAlreadyAcquired,
   jarToCookieList,
   jarToCookieHeader,
+  fetchXyUserInfo,
+  parseCurrentLv,
+  resolveMaxVipLevel,
+  levelRank,
   pickTargetByVip,
   findSamePeriod,
   fetchShowingList,
   acquire,
+  syncServerTime,
+  nowMs,
+  getServerOffsetMs,
+  formatCountdownMs,
   normalizeLevel,
   sleep,
   waitUntil,
   toMs,
   readCookie,
   LOG_DIR,
+  ACT_INFO_ID,
 };

@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS \`accounts\` (
   \`vip_raw\` MEDIUMTEXT NULL,
   \`self_raw\` MEDIUMTEXT NULL,
   \`status\` TINYINT NOT NULL DEFAULT 1,
+  \`success_count\` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '真实抢购成功次数（不含已领取）',
   \`logged_in_at\` DATETIME NULL,
   \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -70,6 +71,19 @@ CREATE TABLE IF NOT EXISTS \`login_sessions\` (
   KEY \`idx_status\` (\`status\`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `);
+
+  // 已有库补列
+  try {
+    await conn.query(
+      `ALTER TABLE \`accounts\` ADD COLUMN \`success_count\` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '真实抢购成功次数（不含已领取）' AFTER \`status\``
+    );
+    console.log('[init-db] added accounts.success_count');
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      console.warn(`[init-db] success_count 列: ${e.message}`);
+    }
+  }
+
   await conn.end();
   console.log(`[init-db] ok, database=${database}`);
 }

@@ -288,12 +288,15 @@ class LoginService {
     const vipResult = vipData.result || vipData.data || {};
     const selfResult = selfData.result || selfData.data || selfData || {};
 
-    const vipLevel =
+    // 账号可抢的最大档位 = get-info.currentLv（官方等级接口）
+    const rawLv =
       vipResult.currentLv ||
+      vipResult.maxLv ||
       vipResult.level ||
       vipResult.vipLevel ||
-      (vipResult.user && vipResult.user.currentLv) ||
-      'V1';
+      (vipResult.user && (vipResult.user.currentLv || vipResult.user.level)) ||
+      null;
+    const vipLevel = normalizeVipLevel(rawLv);
 
     const nickname =
       selfResult.nick ||
@@ -318,12 +321,16 @@ class LoginService {
       this.client.defaults.headers.common['gl-uid'] = godCookie.value;
     }
 
+    if (!rawLv) {
+      console.warn(`[login] get-info 未返回 currentLv，暂存为 ${vipLevel}`);
+    } else {
+      console.log(`[login] 账号最大档位 currentLv=${vipLevel}`);
+    }
+
     return {
       mobile: String(mobile),
       nickname: String(nickname),
-      vipLevel: String(vipLevel).toUpperCase().startsWith('V')
-        ? String(vipLevel).toUpperCase()
-        : `V${vipLevel}`,
+      vipLevel,
       uid,
       godUuid: godCookie ? godCookie.value : null,
       deviceId: this.deviceId,
@@ -336,4 +343,13 @@ class LoginService {
   }
 }
 
-module.exports = { LoginService };
+function normalizeVipLevel(level) {
+  if (level == null || level === '') return 'V1';
+  const s = String(level).trim().toUpperCase();
+  if (/^V\d+$/.test(s)) return s;
+  const m = s.match(/(\d+)/);
+  if (m) return `V${m[1]}`;
+  return s.startsWith('V') ? s : `V${s}`;
+}
+
+module.exports = { LoginService, normalizeVipLevel };

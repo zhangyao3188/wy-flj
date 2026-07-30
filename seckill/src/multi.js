@@ -5,15 +5,19 @@ const localEnv = path.resolve(__dirname, '../.env');
 if (fs.existsSync(localEnv)) require('dotenv').config({ path: localEnv });
 
 const accountRepo = require('./accountRepo');
-const { ensureXsrf, waitUntil } = require('./client');
+const { ensureXsrf, waitUntil, nowMs } = require('./client');
 const {
   prepareAccount,
   warmupSession,
   fireLoop,
   formatLeft,
   resolveAcquireIntervalMs,
+  calibrateClock,
+  waitUntilServer,
   FIRE_EARLY_MS,
   WARMUP_BEFORE_MS,
+  COUNTDOWN_LAST_MS,
+  TEST_COUNTDOWN_MS,
 } = require('./runner');
 
 /**
@@ -42,6 +46,8 @@ async function runMulti(options = {}) {
   const fireEarlyMs = options.fireEarlyMs != null ? options.fireEarlyMs : FIRE_EARLY_MS;
   const warmupBeforeMs =
     options.warmupBeforeMs != null ? options.warmupBeforeMs : WARMUP_BEFORE_MS;
+  const testCountdownMs =
+    options.testCountdownMs != null ? options.testCountdownMs : TEST_COUNTDOWN_MS;
 
   const users = await loadAccountsFromDb(options.mobiles);
   const mobiles = users.map((u) => u.mobile);
@@ -50,11 +56,11 @@ async function runMulti(options = {}) {
   console.log('==============================');
   console.log('   多账号并行抢购（线上数据库）');
   console.log('==============================');
-  console.log(`[dev] 账号数=${mobiles.length}${immediate ? ' [测试立即抢]' : ''}`);
+  console.log(`[dev] 账号数=${mobiles.length}${immediate ? ' [测试倒计时抢]' : ''}`);
   console.log(`[dev] 账号: ${mobiles.join(', ')}`);
   const intervalMs = resolveAcquireIntervalMs(options);
   console.log(
-    `[dev] 启动预热 + 开抢前 ${warmupBeforeMs / 1000}s 再预热；成功即停该账号；轮询间隔=${intervalMs}ms`
+    `[dev] 启动预热 + 开抢前 ${warmupBeforeMs / 1000}s 再预热；成功即停；轮询间隔=${intervalMs}ms；末${COUNTDOWN_LAST_MS / 1000}s毫秒倒计时`
   );
   console.log('');
 
@@ -96,29 +102,24 @@ async function runMulti(options = {}) {
   }
   console.log('');
 
+  // 任意一个账号校准服务器时间（拿到档位开始时间之后）
+  await calibrateClock(prepared[0].client, '[dev] ');
+
   if (!immediate) {
     const earliestStart = Math.min(...prepared.map((a) => a.ready.seckillStartTime));
     const warmAt = earliestStart - warmupBeforeMs;
     const wakeAt = earliestStart - fireEarlyMs;
 
-    if (Date.now() < warmAt) {
+    if (nowMs() < warmAt) {
       console.log(
-        `[dev] 等待开抢前 ${warmupBeforeMs / 1000}s 二次预热（约 ${formatLeft(warmAt - Date.now())} 后）`
+        `[dev] 等待开抢前 ${warmupBeforeMs / 1000}s 二次预热（约 ${formatLeft(
+          warmAt - nowMs()
+        )} 后，服务器时间）`
       );
-      let lastLog = 0;
-      await waitUntil(warmAt, {
-        onTick: () => {
-          const now = Date.now();
-          if (now - lastLog > 10000) {
-            lastLog = now;
-            console.log(`[dev] 等待中，距二次预热 ${formatLeft(warmAt - Date.now())}`);
-          }
-        },
-      });
+      await waitUntilServer(warmAt, { label: '等待预热' });
     }
 
-    // 开抢前 30s：全员再预热一遍（过期则更新 cookie）
-    if (Date.now() < wakeAt + 5000) {
+    if (nowMs() < wakeAt + 5000) {
       console.log(`[dev] >>> 开抢前预热（${prepared.length} 账号）`);
       const warmResults = await Promise.all(
         prepared.map(async (account) => {
@@ -134,25 +135,28 @@ async function runMulti(options = {}) {
       );
       const warmOk = warmResults.filter((r) => r.ok).length;
       console.log(`[dev] 开抢前预热完成 ${warmOk}/${prepared.length}`);
+      // 预热后再校准，减小时钟漂移
+      const alive = prepared.find((a) => !a._warmupFailed);
+      if (alive) await calibrateClock(alive.client, '[dev] ');
     }
 
-    if (Date.now() < wakeAt) {
+    if (nowMs() < wakeAt) {
       console.log(
-        `[dev] 二次预热完成，最早开火约 ${formatLeft(wakeAt - Date.now())} 后（开抢前 ${fireEarlyMs}ms）`
+        `[dev] 二次预热完成，最早开火约 ${formatLeft(wakeAt - nowMs())} 后；末 ${
+          COUNTDOWN_LAST_MS / 1000
+        }s 毫秒倒计时`
       );
-      let lastLog = 0;
-      await waitUntil(wakeAt, {
-        onTick: () => {
-          const now = Date.now();
-          if (now - lastLog > 10000) {
-            lastLog = now;
-            console.log(`[dev] 预备中，距最早开火 ${formatLeft(wakeAt - Date.now())}`);
-          }
-        },
-      });
+      await waitUntilServer(wakeAt, { label: '开抢倒计时' });
     }
   } else {
-    console.log('[dev] 测试模式：启动预热完成，立即并行开火');
+    const fireAt = nowMs() + testCountdownMs;
+    console.log(
+      `[dev] 测试模式：模拟倒计时 ${testCountdownMs}ms 后并行开火（服务器时间）`
+    );
+    await waitUntil(fireAt, {
+      label: '测试倒计时',
+      countdownLastMs: testCountdownMs,
+    });
   }
 
   const toFire = prepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
@@ -170,7 +174,13 @@ async function runMulti(options = {}) {
       try {
         if (!immediate) {
           const fireAt = account.ready.seckillStartTime - fireEarlyMs;
-          if (Date.now() < fireAt) await waitUntil(fireAt);
+          if (nowMs() < fireAt) {
+            await waitUntil(fireAt, {
+              label: account.mobile,
+              countdownLastMs: COUNTDOWN_LAST_MS,
+              quiet: toFire.length > 1,
+            });
+          }
           await ensureXsrf(account.client, account.jar);
         }
         console.log(`[${account.mobile}] 开火 couponId=${account.ready.couponId}`);
@@ -209,7 +219,7 @@ async function runMulti(options = {}) {
   console.log('[dev] ========== 汇总 ==========');
   for (const r of results) {
     console.log(
-      `[dev] ${r.mobile} success=${!!r.success} attempts=${r.attempts || 0}${r.stopReason ? ` stop=${r.stopReason}` : ''}${r.error ? ` error=${r.error}` : ''}`
+      `[dev] ${r.mobile} success=${!!r.success} attempts=${r.attempts || 0}${r.stopReason ? ` stop=${r.stopReason}` : ''}${r.successCount != null ? ` successCount=${r.successCount}` : ''}${r.error ? ` error=${r.error}` : ''}`
     );
   }
   for (const f of failed) {

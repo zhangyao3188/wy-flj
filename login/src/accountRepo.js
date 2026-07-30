@@ -30,6 +30,7 @@ function rowToUser(row) {
     vipRaw,
     selfRaw,
     status: row.status,
+    successCount: Number(row.success_count) || 0,
     loggedInAt: row.logged_in_at,
     updatedAt: row.updated_at,
   };

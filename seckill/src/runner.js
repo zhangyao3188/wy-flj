@@ -18,7 +18,11 @@ const {
   pickTargetByVip,
   findSamePeriod,
   fetchShowingList,
+  fetchXyUserInfo,
+  resolveMaxVipLevel,
   acquire,
+  syncServerTime,
+  nowMs,
   normalizeLevel,
   waitUntil,
   readCookie,
@@ -28,7 +32,11 @@ const {
 /** 开抢前多少毫秒开始发请求 */
 const FIRE_EARLY_MS = 100;
 /** 开抢前多少毫秒再预热一遍 */
-const WARMUP_BEFORE_MS = 30000;
+const WARMUP_BEFORE_MS = 15000;
+/** 正式倒计时展示窗口（末 N 毫秒精确到 ms） */
+const COUNTDOWN_LAST_MS = 10000;
+/** 测试模式模拟倒计时时长 */
+const TEST_COUNTDOWN_MS = 5000;
 
 function resolveAcquireIntervalMs(options = {}) {
   if (options.intervalMs != null && Number.isFinite(Number(options.intervalMs))) {
@@ -37,6 +45,36 @@ function resolveAcquireIntervalMs(options = {}) {
   const fromEnv = Number(process.env.ACQUIRE_INTERVAL_MS);
   if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv;
   return 0;
+}
+
+async function calibrateClock(client, tag = '[seckill] ') {
+  const sync = await syncServerTime(client);
+  console.log(
+    `${tag}服务器时间校准 currentTime=${sync.currentTime} offset=${
+      sync.serverOffsetMs >= 0 ? '+' : ''
+    }${sync.serverOffsetMs}ms rtt=${sync.rttMs}ms`
+  );
+  return sync;
+}
+
+/**
+ * 等到目标服务器时刻；末 10 秒毫秒倒计时。
+ */
+async function waitUntilServer(targetMs, { label = '开抢', logEveryMs = 10000 } = {}) {
+  let lastLog = 0;
+  await waitUntil(targetMs, {
+    label,
+    countdownLastMs: COUNTDOWN_LAST_MS,
+    onTick: (left) => {
+      if (left > COUNTDOWN_LAST_MS) {
+        const t = nowMs();
+        if (t - lastLog > logEveryMs) {
+          lastLog = t;
+          console.log(`[${label}] 等待中，剩余 ${formatLeft(left)}（服务器时间）`);
+        }
+      }
+    },
+  });
 }
 
 function formatLeft(ms) {
@@ -58,7 +96,7 @@ function inferStockId(target) {
   return null;
 }
 
-async function persistCookies(user, jar, tag = '') {
+async function persistCookies(user, jar, tag = '', extra = {}) {
   try {
     const cookies = jarToCookieList(jar);
     const cookieHeader = jarToCookieHeader(jar);
@@ -68,16 +106,18 @@ async function persistCookies(user, jar, tag = '') {
       cookieHeader,
       godUuid,
       deviceId: user.deviceId || null,
+      ...(extra.vipLevel ? { vipLevel: extra.vipLevel } : {}),
+      ...(extra.vipRaw != null ? { vipRaw: extra.vipRaw } : {}),
     });
-    if (tag) console.log(`${tag}已将刷新后的 cookie 写回数据库`);
+    if (tag) console.log(`${tag}已将刷新后的 cookie${extra.vipLevel ? `/等级${extra.vipLevel}` : ''} 写回数据库`);
   } catch (e) {
     console.warn(`${tag}写回 cookie 失败: ${e.message || e}`);
   }
 }
 
 /**
- * 预热：走一遍抢购链路（xsrf → nlogin → cookie-exchange → showing-list → 预备参数）
- * 若返回 873，再强制 cookie-exchange 并重试；成功后写回 DB。
+ * 预热：走一遍抢购链路（xsrf → nlogin → cookie-exchange → get-info等级 → showing-list → 预备参数）
+ * 等级以 get-info.currentLv 为准（账号最大可抢档位）；若过期则更新 cookie。
  */
 async function warmupSession(account, { label = '预热' } = {}) {
   const tag = `[${account.mobile}] `;
@@ -87,7 +127,6 @@ async function warmupSession(account, { label = '预热' } = {}) {
   await ensureXsrf(client, jar);
   await ensureSession(client).catch(() => null);
 
-  // 主动换票，模拟页面刷新更新 cookie
   try {
     await cookieExchange(client);
   } catch (e) {
@@ -95,12 +134,27 @@ async function warmupSession(account, { label = '预热' } = {}) {
   }
   await ensureXsrf(client, jar);
 
+  // 拉取账号最大档位
+  let vipData = null;
+  try {
+    vipData = await fetchXyUserInfo(client);
+    if (isSessionExpired(vipData)) {
+      console.warn(`${tag}${label} get-info 会话过期(873)，重新 cookie-exchange…`);
+      await cookieExchange(client);
+      await ensureXsrf(client, jar);
+      vipData = await fetchXyUserInfo(client);
+    }
+  } catch (e) {
+    console.warn(`${tag}${label} get-info 失败: ${e.message || e}`);
+  }
+
   let listResp = await fetchShowingList(client);
   if (isSessionExpired(listResp)) {
     console.warn(`${tag}${label}检测到会话过期(873)，重新 cookie-exchange…`);
     await cookieExchange(client);
     await ensureXsrf(client, jar);
     await ensureSession(client).catch(() => null);
+    vipData = await fetchXyUserInfo(client).catch(() => vipData);
     listResp = await fetchShowingList(client);
     if (isSessionExpired(listResp)) {
       throw new Error('会话仍过期(873)，请重新通过 login 登录');
@@ -111,10 +165,22 @@ async function warmupSession(account, { label = '预热' } = {}) {
     throw new Error(`获取秒杀列表失败: ${JSON.stringify(listResp).slice(0, 300)}`);
   }
 
-  await persistCookies(user || { mobile: account.mobile }, jar, tag);
-
   const listResult = listResp.result || listResp.data || listResp;
-  const vipLevel = account.vipLevel || 'V1';
+  const vipLevel = resolveMaxVipLevel(
+    vipData,
+    listResult,
+    account.vipLevel || (user && user.vipLevel) || 'V1'
+  );
+  account.vipLevel = vipLevel;
+  if (user) user.vipLevel = vipLevel;
+
+  await persistCookies(user || { mobile: account.mobile }, jar, tag, {
+    vipLevel,
+    vipRaw: vipData,
+  });
+
+  console.log(`${tag}${label}账号最大档位=${vipLevel}（来源 get-info.currentLv）`);
+
   const { target, reason, candidates } = pickTargetByVip(listResult, vipLevel);
   if (!target || !target.couponId || !Number.isFinite(target.seckillStartTime)) {
     throw new Error(`选品失败: ${reason}; candidates=${candidates.length}`);
@@ -138,7 +204,7 @@ async function warmupSession(account, { label = '预热' } = {}) {
   account.reason = reason;
   account.warmedAt = Date.now();
   console.log(
-    `${tag}${label}完成 couponId=${ready.couponId} stockId=${ready.stockId} start=${new Date(
+    `${tag}${label}完成 档位=${vipLevel} couponId=${ready.couponId} stockId=${ready.stockId} start=${new Date(
       ready.seckillStartTime
     ).toLocaleString('zh-CN', { hour12: false })}`
   );
@@ -209,6 +275,7 @@ async function fireLoop(client, ready, target, options = {}) {
   let attempt = 0;
   let success = false;
   let stopReason = null;
+  let successCount = null;
   let refreshedOn873 = false;
   const startedAt = Date.now();
 
@@ -224,20 +291,37 @@ async function fireLoop(client, ready, target, options = {}) {
       const code = resp && resp.code;
       const msg = (resp && (resp.errmsg || resp.message)) || '';
 
-      // 成功结构：code=200 + result.received=true → 立刻停该账号
+      // 成功结构：code=200 + result.received=true → 立刻停该账号，并计入成功次数
       if (isAcquireSuccess(resp)) {
         success = true;
         stopReason = 'acquired';
-        console.log(
-          `${tag}[seckill] SUCCESS #${attempt} ${cost}ms received=true → 停止该账号`
-        );
+        const mobile = (user && user.mobile) || options.tag;
+        if (mobile) {
+          try {
+            await accountRepo.ensureSuccessCountColumn();
+            successCount = await accountRepo.incrementSuccessCount(mobile);
+            console.log(
+              `${tag}[seckill] SUCCESS #${attempt} ${cost}ms received=true → 停止该账号，成功次数=${successCount}`
+            );
+          } catch (e) {
+            console.log(
+              `${tag}[seckill] SUCCESS #${attempt} ${cost}ms received=true → 停止该账号（写库失败: ${e.message || e}）`
+            );
+          }
+        } else {
+          console.log(
+            `${tag}[seckill] SUCCESS #${attempt} ${cost}ms received=true → 停止该账号`
+          );
+        }
         break;
       }
 
       if (isAlreadyAcquired(resp)) {
         success = true;
         stopReason = 'already_acquired';
-        console.log(`${tag}[seckill] 已领取 #${attempt} ${cost}ms → 停止该账号`);
+        console.log(
+          `${tag}[seckill] 已领取 #${attempt} ${cost}ms → 停止该账号（不计成功次数）`
+        );
         break;
       }
 
@@ -293,6 +377,7 @@ async function fireLoop(client, ready, target, options = {}) {
     target: ready,
     stopReason,
     intervalMs,
+    successCount: stopReason === 'acquired' ? successCount : undefined,
   };
 }
 
@@ -310,6 +395,7 @@ async function prepareAccount(mobile, options = {}) {
   }
 
   const immediate = !!options.immediate;
+  // 等级以预热时 get-info 为准；此处仅作初始占位
   const vipLevel = normalizeLevel(options.vipLevel || user.vipLevel || 'V1');
   const { client, jar, logFile } = createClientFromUser(user);
 
@@ -338,16 +424,18 @@ async function prepareAccount(mobile, options = {}) {
 
 /**
  * 抢购流程：
- * 正式模式：启动预热 → 开抢前30s再预热 → 开抢前100ms 连续 acquire
- * 测试模式：预热后立刻 acquire
+ * 正式模式：启动预热 → 校准服务器时间 → 开抢前15s再预热 → 末10s毫秒倒计时 → 开抢前100ms 连续 acquire
+ * 测试模式：预热 → 模拟 5s 倒计时 → 开火
  */
 async function runSeckill(mobile, options = {}) {
   const immediate = !!options.immediate;
   const fireEarlyMs = options.fireEarlyMs != null ? options.fireEarlyMs : FIRE_EARLY_MS;
   const warmupBeforeMs =
     options.warmupBeforeMs != null ? options.warmupBeforeMs : WARMUP_BEFORE_MS;
+  const testCountdownMs =
+    options.testCountdownMs != null ? options.testCountdownMs : TEST_COUNTDOWN_MS;
 
-  console.log(`[seckill] 用户=${mobile}${immediate ? ' [测试立即抢]' : ''}`);
+  console.log(`[seckill] 用户=${mobile}${immediate ? ' [测试倒计时抢]' : ''}`);
   const account = await prepareAccount(mobile, options);
 
   console.log(
@@ -370,6 +458,9 @@ async function runSeckill(mobile, options = {}) {
   console.log(`[seckill] seckillStartTime=${account.ready.seckillStartTime} (${startAt})`);
   console.log('[seckill] ==============================');
 
+  // 拿到档位开抢时间后，立刻用服务器时间校准
+  await calibrateClock(account.client);
+
   if (account.alreadyAcquired) {
     console.log('[seckill] 本场已领取，跳过开火');
     return {
@@ -383,29 +474,31 @@ async function runSeckill(mobile, options = {}) {
     };
   }
 
-  if (!immediate) {
+  if (immediate) {
+    const fireAt = nowMs() + testCountdownMs;
+    console.log(
+      `[seckill] 测试模式：模拟倒计时 ${testCountdownMs}ms 后开火（按服务器时间）`
+    );
+    await waitUntil(fireAt, {
+      label: '测试倒计时',
+      countdownLastMs: testCountdownMs,
+    });
+    await ensureXsrf(account.client, account.jar);
+  } else {
     const startMs = account.ready.seckillStartTime;
     const warmAt = startMs - warmupBeforeMs;
     const fireAt = startMs - fireEarlyMs;
 
-    if (Date.now() < warmAt) {
+    if (nowMs() < warmAt) {
       console.log(
-        `[seckill] 等待开抢前 ${warmupBeforeMs / 1000}s 预热（约 ${formatLeft(warmAt - Date.now())} 后）`
+        `[seckill] 等待开抢前 ${warmupBeforeMs / 1000}s 预热（约 ${formatLeft(
+          warmAt - nowMs()
+        )} 后，服务器时间）`
       );
-      let lastLog = 0;
-      await waitUntil(warmAt, {
-        onTick: () => {
-          const now = Date.now();
-          if (now - lastLog > 10000) {
-            lastLog = now;
-            console.log(`[seckill] 等待中，距预热 ${formatLeft(warmAt - Date.now())}`);
-          }
-        },
-      });
+      await waitUntilServer(warmAt, { label: '等待预热' });
     }
 
-    // 开抢前 30s（或已过该点则立刻）再预热一遍
-    if (Date.now() < fireAt) {
+    if (nowMs() < fireAt) {
       await warmupSession(account, { label: '开抢前预热' });
       if (account.alreadyAcquired) {
         console.log('[seckill] 开抢前预热发现已领取，跳过开火');
@@ -419,13 +512,17 @@ async function runSeckill(mobile, options = {}) {
           stopReason: 'already_acquired',
         };
       }
+      // 预热后再校准一次，减小时钟漂移
+      await calibrateClock(account.client);
     }
 
-    if (Date.now() < fireAt) {
+    if (nowMs() < fireAt) {
       console.log(
-        `[seckill] 预热完成，将在开抢前 ${fireEarlyMs}ms 开火（约 ${formatLeft(fireAt - Date.now())} 后）`
+        `[seckill] 预热完成，将在开抢前 ${fireEarlyMs}ms 开火（约 ${formatLeft(
+          fireAt - nowMs()
+        )} 后）；末 ${COUNTDOWN_LAST_MS / 1000}s 毫秒倒计时`
       );
-      await waitUntil(fireAt);
+      await waitUntilServer(fireAt, { label: '开抢倒计时' });
     } else {
       console.log('[seckill] 已到/超过开火时刻，立即开始');
     }
@@ -433,7 +530,9 @@ async function runSeckill(mobile, options = {}) {
   }
 
   console.log(
-    `[seckill] 开始连续抢购${immediate ? '（测试立即模式）' : `（提前 ${fireEarlyMs}ms）`}…`
+    `[seckill] 开始连续抢购${
+      immediate ? '（测试模式）' : `（提前 ${fireEarlyMs}ms）`
+    }…`
   );
   const intervalMs = resolveAcquireIntervalMs(options);
   if (intervalMs > 0) {
@@ -462,8 +561,12 @@ module.exports = {
   fireLoop,
   formatLeft,
   resolveAcquireIntervalMs,
+  calibrateClock,
+  waitUntilServer,
   FIRE_EARLY_MS,
   WARMUP_BEFORE_MS,
+  COUNTDOWN_LAST_MS,
+  TEST_COUNTDOWN_MS,
 };
 
 function parseCliArgs(argv) {

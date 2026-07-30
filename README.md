@@ -46,7 +46,7 @@ npm install
 npm run dev
 ```
 
-立即测试（不等开抢）：`npm run test:now`
+立即测试（模拟 5s 倒计时后开火）：`npm run test:now`
 
 ## 抢购间隔
 
@@ -56,4 +56,6 @@ npm run dev
 # 每次请求返回后等待多久再发下一枪（毫秒）；0=立即连续发
 ACQUIRE_INTERVAL_MS=1000
 ```
+
+倒计时按服务器时间（`actInfo.currentTime`）校准；正式开抢前 10 秒会显示毫秒倒计时。
 
