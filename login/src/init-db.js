@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS \`accounts\` (
   \`self_raw\` MEDIUMTEXT NULL,
   \`status\` TINYINT NOT NULL DEFAULT 1,
   \`success_count\` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '真实抢购成功次数（不含已领取）',
+  \`target_count\` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '设定的抢购次数',
   \`logged_in_at\` DATETIME NULL,
   \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -60,6 +61,7 @@ CREATE TABLE IF NOT EXISTS \`login_sessions\` (
   \`id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   \`token\` VARCHAR(64) NOT NULL,
   \`status\` VARCHAR(32) NOT NULL DEFAULT 'pending',
+  \`target_count\` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '本次登录设定的抢购次数',
   \`mobile\` VARCHAR(20) NULL,
   \`account_id\` BIGINT UNSIGNED NULL,
   \`message\` VARCHAR(512) NULL,
@@ -81,6 +83,28 @@ CREATE TABLE IF NOT EXISTS \`login_sessions\` (
   } catch (e) {
     if (!/Duplicate column/i.test(e.message || '')) {
       console.warn(`[init-db] success_count 列: ${e.message}`);
+    }
+  }
+
+  try {
+    await conn.query(
+      `ALTER TABLE \`accounts\` ADD COLUMN \`target_count\` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '设定的抢购次数' AFTER \`success_count\``
+    );
+    console.log('[init-db] added accounts.target_count (旧数据默认 1)');
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      console.warn(`[init-db] target_count 列: ${e.message}`);
+    }
+  }
+
+  try {
+    await conn.query(
+      `ALTER TABLE \`login_sessions\` ADD COLUMN \`target_count\` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '本次登录设定的抢购次数' AFTER \`status\``
+    );
+    console.log('[init-db] added login_sessions.target_count');
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      console.warn(`[init-db] login_sessions.target_count 列: ${e.message}`);
     }
   }
 

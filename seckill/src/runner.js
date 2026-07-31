@@ -35,8 +35,67 @@ const FIRE_EARLY_MS = 100;
 const WARMUP_BEFORE_MS = 15000;
 /** 正式倒计时展示窗口（末 N 毫秒精确到 ms） */
 const COUNTDOWN_LAST_MS = 10000;
-/** 测试模式模拟倒计时时长 */
+/** 测试模式模拟倒计时时长（未指定 --at 时） */
 const TEST_COUNTDOWN_MS = 5000;
+
+/**
+ * 解析测试开抢时间。
+ * 支持：
+ * - 13 位毫秒时间戳 / 10 位秒时间戳
+ * - HH:mm:ss / HH:mm（当天；若已过则视为明天）
+ * - YYYY-MM-DD HH:mm:ss
+ */
+function parseTestStartTime(input, refNow = Date.now()) {
+  if (input == null || input === '') return null;
+  const s = String(input).trim();
+  if (!s) return null;
+
+  if (/^\d{13}$/.test(s)) return Number(s);
+  if (/^\d{10}$/.test(s)) return Number(s) * 1000;
+
+  let m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (m) {
+    const d = new Date(refNow);
+    d.setHours(Number(m[1]), Number(m[2]), Number(m[3] || 0), 0);
+    let t = d.getTime();
+    if (t <= refNow) t += 24 * 60 * 60 * 1000;
+    return t;
+  }
+
+  m = s.match(
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+  if (m) {
+    return new Date(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4] || 0),
+      Number(m[5] || 0),
+      Number(m[6] || 0),
+      0
+    ).getTime();
+  }
+
+  const parsed = Date.parse(s.replace(/-/g, '/'));
+  if (Number.isFinite(parsed)) return parsed;
+  throw new Error(`无法解析开始时间: ${input}`);
+}
+
+/**
+ * 测试模式开火时刻：有 --at 用指定时间，否则 now + 5s
+ */
+function resolveTestFireAt(options = {}, now = nowMs()) {
+  if (options.testStartAtMs != null && Number.isFinite(Number(options.testStartAtMs))) {
+    return Number(options.testStartAtMs);
+  }
+  if (options.testStartAt) {
+    return parseTestStartTime(options.testStartAt, now);
+  }
+  const testCountdownMs =
+    options.testCountdownMs != null ? options.testCountdownMs : TEST_COUNTDOWN_MS;
+  return now + testCountdownMs;
+}
 
 function resolveAcquireIntervalMs(options = {}) {
   if (options.intervalMs != null && Number.isFinite(Number(options.intervalMs))) {
@@ -432,8 +491,6 @@ async function runSeckill(mobile, options = {}) {
   const fireEarlyMs = options.fireEarlyMs != null ? options.fireEarlyMs : FIRE_EARLY_MS;
   const warmupBeforeMs =
     options.warmupBeforeMs != null ? options.warmupBeforeMs : WARMUP_BEFORE_MS;
-  const testCountdownMs =
-    options.testCountdownMs != null ? options.testCountdownMs : TEST_COUNTDOWN_MS;
 
   console.log(`[seckill] 用户=${mobile}${immediate ? ' [测试倒计时抢]' : ''}`);
   const account = await prepareAccount(mobile, options);
@@ -475,14 +532,17 @@ async function runSeckill(mobile, options = {}) {
   }
 
   if (immediate) {
-    const fireAt = nowMs() + testCountdownMs;
-    console.log(
-      `[seckill] 测试模式：模拟倒计时 ${testCountdownMs}ms 后开火（按服务器时间）`
-    );
-    await waitUntil(fireAt, {
-      label: '测试倒计时',
-      countdownLastMs: testCountdownMs,
-    });
+    const fireAt = resolveTestFireAt(options, nowMs());
+    const left = fireAt - nowMs();
+    const atText = new Date(fireAt).toLocaleString('zh-CN', { hour12: false });
+    if (left <= 0) {
+      console.log(`[seckill] 测试模式：指定时间 ${atText} 已过，立即开火`);
+    } else {
+      console.log(
+        `[seckill] 测试模式：等待到 ${atText} 开火（约 ${formatLeft(left)}，服务器时间）`
+      );
+      await waitUntilServer(fireAt, { label: '测试倒计时' });
+    }
     await ensureXsrf(account.client, account.jar);
   } else {
     const startMs = account.ready.seckillStartTime;
@@ -563,6 +623,8 @@ module.exports = {
   resolveAcquireIntervalMs,
   calibrateClock,
   waitUntilServer,
+  parseTestStartTime,
+  resolveTestFireAt,
   FIRE_EARLY_MS,
   WARMUP_BEFORE_MS,
   COUNTDOWN_LAST_MS,
@@ -571,37 +633,60 @@ module.exports = {
 
 function parseCliArgs(argv) {
   const args = argv.slice(2);
-  const flags = new Set(args.filter((a) => a.startsWith('-')));
-  const positional = args.filter((a) => !a.startsWith('-'));
-  const mobile = positional[0] || process.env.MOBILE;
+  const flags = new Set(args.filter((a) => a.startsWith('-') && !a.includes(':')));
+  const positional = [];
+  let testStartAt;
+  let maxAttempts;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--at' || a === '--start' || a === '--start-at') {
+      testStartAt = args[++i];
+      continue;
+    }
+    if (a.startsWith('--at=') || a.startsWith('--start=') || a.startsWith('--start-at=')) {
+      testStartAt = a.slice(a.indexOf('=') + 1);
+      continue;
+    }
+    if (a === '--max' || a === '--max-attempts') {
+      maxAttempts = Number(args[++i]);
+      continue;
+    }
+    if (a.startsWith('-')) continue;
+    positional.push(a);
+  }
   const immediate =
     flags.has('--now') ||
     flags.has('-n') ||
     flags.has('--immediate') ||
     flags.has('--test') ||
+    !!testStartAt ||
     process.env.SECKILL_IMMEDIATE === '1';
-  let maxAttempts;
-  const maxIdx = args.findIndex((a) => a === '--max' || a === '--max-attempts');
-  if (maxIdx >= 0 && args[maxIdx + 1]) {
-    maxAttempts = Number(args[maxIdx + 1]);
-  } else if (process.env.SECKILL_MAX_ATTEMPTS) {
+  const mobile = positional[0] || process.env.MOBILE;
+  if (process.env.SECKILL_MAX_ATTEMPTS && !Number.isFinite(maxAttempts)) {
     maxAttempts = Number(process.env.SECKILL_MAX_ATTEMPTS);
   }
-  return { mobile, immediate, maxAttempts };
+  return {
+    mobile,
+    immediate,
+    maxAttempts: Number.isFinite(maxAttempts) ? maxAttempts : undefined,
+    testStartAt: testStartAt || process.env.SECKILL_TEST_START_AT || undefined,
+  };
 }
 
 if (require.main === module) {
-  const { mobile, immediate, maxAttempts } = parseCliArgs(process.argv);
+  const { mobile, immediate, maxAttempts, testStartAt } = parseCliArgs(process.argv);
   if (!mobile) {
     console.error('用法:');
     console.error('  npm run seckill -- <手机号>           # 预备后，开抢前100ms开火');
-    console.error('  npm run test:now -- <手机号>          # 测试：预备后立即抢');
-    console.error('  npm run test:now -- <手机号> --max 3');
+    console.error('  npm run test:now -- <手机号>          # 测试：5s 倒计时后抢');
+    console.error('  npm run test:now -- <手机号> --at 12:05:00');
+    console.error('  npm run test:now -- <手机号> --at "2026-07-31 12:05:00"');
     process.exit(1);
   }
   runSeckill(mobile, {
     immediate,
     ...(Number.isFinite(maxAttempts) ? { maxAttempts } : {}),
+    ...(testStartAt ? { testStartAt } : {}),
   })
     .then((r) => {
       console.log('[seckill] finished', {
@@ -614,6 +699,7 @@ if (require.main === module) {
         stockId: r.target && r.target.stockId,
         seckillStartTime: r.target && r.target.seckillStartTime,
         immediate,
+        testStartAt,
       });
       process.exit(r.success ? 0 : 2);
     })

@@ -16,6 +16,9 @@ function applyBrowserCookies(jar, cookies) {
       'https://pay-api.ds.163.com/',
       'https://inf.ds.163.com/',
       'https://www.163.com/',
+      'https://dl.reg.163.com/',
+      'https://reg.163.com/',
+      'https://passport.163.com/',
     ]) {
       try {
         jar.setCookieSync(cookieStr, url);
@@ -37,34 +40,93 @@ function hasSessionHint(map) {
     map.NTES_YD_SESS ||
     map.NTES_SESS ||
     map.NTES_YD_PASSPORT ||
+    map.NTES_PASSPORT ||
     map.S_INFO ||
     map.P_INFO ||
     map.GOD_UUID ||
-    map.THE_LAST_LOGIN_MOBILE
+    map.THE_LAST_LOGIN_MOBILE ||
+    map.NTES_plutus_online_front ||
+    map.NTES_plutus_p_info_online ||
+    map.JSESSIONID
   );
 }
 
 function extractMobile(map) {
-  if (map.THE_LAST_LOGIN_MOBILE && /^1\d{10}$/.test(map.THE_LAST_LOGIN_MOBILE)) {
-    return map.THE_LAST_LOGIN_MOBILE;
+  if (map.THE_LAST_LOGIN_MOBILE && /^1\d{10}$/.test(String(map.THE_LAST_LOGIN_MOBILE))) {
+    return String(map.THE_LAST_LOGIN_MOBILE);
   }
+  for (const key of ['P_INFO', 'S_INFO', 'NTES_SESS_USER', 'URS_USER']) {
+    if (!map[key]) continue;
+    const m = String(map[key]).match(/(1\d{10})/);
+    if (m) return m[1];
+  }
+  // 宽搜所有 cookie 值
+  for (const v of Object.values(map)) {
+    const m = String(v || '').match(/(?:^|[^\d])(1\d{10})(?:[^\d]|$)/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+function extractMobileFromSelf(selfData) {
+  if (!selfData || typeof selfData !== 'object') return null;
+  const result = selfData.result || selfData.data || selfData;
+  const candidates = [
+    result.mobile,
+    result.phone,
+    result.account,
+    result.actAccount,
+    result.ursAccount,
+    result.loginName,
+    result.userName,
+    result.user && result.user.mobile,
+    result.user && result.user.phone,
+    result.user && result.user.account,
+  ];
+  for (const c of candidates) {
+    const m = String(c || '').match(/(1\d{10})/);
+    if (m) return m[1];
+  }
+  const blob = JSON.stringify(result);
+  const hit = blob.match(/1\d{10}/);
+  return hit ? hit[0] : null;
+}
+
+function extractAccountHint(map) {
+  // 账号密码登录常见：P_INFO 里是邮箱而非手机号
   if (map.P_INFO) {
+    const email = String(map.P_INFO).split('|')[0];
+    if (email && email.includes('@')) return email;
     const m = String(map.P_INFO).match(/(1\d{10})/);
     if (m) return m[1];
   }
   if (map.S_INFO) {
-    const m = String(map.S_INFO).match(/(1\d{10})/);
-    if (m) return m[1];
+    const part = String(map.S_INFO).split('|').pop();
+    if (part && part.includes('@')) return part;
   }
-  return null;
+  return extractMobile(map);
+}
+
+function isSelfOk(selfData) {
+  if (!selfData || typeof selfData !== 'object') return false;
+  if (selfData.error) return false;
+  return (
+    selfData.code === 0 ||
+    selfData.code === 200 ||
+    selfData.msg === 'ok' ||
+    selfData.errmsg === 'OK' ||
+    !!(selfData.result || selfData.data) ||
+    !!(selfData.nick || selfData.nickname || selfData.name)
+  );
 }
 
 /**
  * 远程登录会话：手机视口，方便移动端点击登录框。
  */
 class RemoteLoginSession {
-  constructor(token) {
+  constructor(token, targetCount = 1) {
     this.token = token;
+    this.targetCount = accountRepo.normalizeTargetCount(targetCount);
     this.browser = null;
     this.context = null;
     this.page = null;
@@ -336,15 +398,197 @@ class RemoteLoginSession {
     const profile = await this._buildProfile(fresh);
     if (!profile) return;
 
-    const saved = await accountRepo.upsertAccount(profile);
+    await this._commitSuccess(profile);
+  }
+
+  /**
+   * 手动提取：兼容验证码 / 账号密码登录。
+   * 账号密码登录后常无手机号 Cookie，且需先在 pay 域完成换票，因此走浏览器内探测 + 强制落库。
+   */
+  async extractAndSave(opts = {}) {
+    if (this._closed) throw new Error('会话已关闭');
+    if (this.status === 'success') {
+      return {
+        ok: true,
+        mobile: this.mobile,
+        account: this.account,
+        message: '已入库，无需重复提取',
+      };
+    }
+    if (this.status !== 'running' || !this.context || !this.page) {
+      throw new Error('会话不可用');
+    }
+
+    const mobileHint = opts.mobile ? String(opts.mobile).trim() : '';
+    if (mobileHint && !/^1\d{10}$/.test(mobileHint)) {
+      throw new Error('手机号格式不正确');
+    }
+
+    this.message = '正在提取账号信息并写入数据库…';
+    await accountRepo.updateLoginSession(this.token, {
+      status: 'running',
+      message: this.message,
+    });
+
+    try {
+      await this._ensurePaySessionReady();
+    } catch (e) {
+      console.warn(`[login] ensurePaySession: ${e.message || e}`);
+    }
+
+    const fresh = await this.context.cookies();
+    const map = cookieListToMap(fresh);
+    const cookieNames = Object.keys(map);
+    console.log(
+      `[login] extract cookies(${cookieNames.length}): ${cookieNames.slice(0, 30).join(',')}`
+    );
+
+    const probe = await this._probeFromBrowser();
+    console.log(
+      `[login] extract probe selfOk=${isSelfOk(probe.self)} getInfo=${
+        probe.getInfo && (probe.getInfo.code || probe.getInfo.errmsg)
+      } localMobile=${probe.localMobile || ''}`
+    );
+
+    if (!hasSessionHint(map) && !isSelfOk(probe.self) && !mobileHint) {
+      throw new Error(
+        `尚未检测到登录态（Cookie: ${cookieNames.slice(0, 12).join(',') || '无'}）。请确认画面已登录成功后再提取`
+      );
+    }
+
+    const profile = await this._buildProfile(fresh, mobileHint || null, probe);
+    if (!profile) {
+      const accountHint = extractAccountHint(map) || '';
+      throw new Error(
+        `提取失败：未能拿到可用于入库的手机号或会话。` +
+          (accountHint ? `检测到账号标识=${accountHint}，` : '') +
+          `请在上方填写绑定手机号后重试。（Cookie: ${cookieNames.slice(0, 15).join(',') || '无'}）`
+      );
+    }
+
+    await this._commitSuccess(profile);
+    return {
+      ok: true,
+      mobile: this.mobile,
+      account: this.account,
+      message: this.message,
+    };
+  }
+
+  /** 账号密码登录后，等 pay 域换票完成（GOD_UUID / plutus） */
+  async _ensurePaySessionReady() {
+    if (!this.page) return;
+    try {
+      await this.page.goto('https://pay.ds.163.com/', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
+      await this.page.waitForTimeout(1200);
+    } catch (_) {}
+
+    try {
+      await this.page.goto('https://pay.ds.163.com/vip/profile', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
+      await this.page.waitForTimeout(1500);
+    } catch (_) {}
+
+    // 浏览器内主动触发 nlogin / cookie-exchange，帮助密码登录换票
+    try {
+      await this.page.evaluate(async () => {
+        const tryFetch = async (url, init) => {
+          try {
+            await fetch(url, init);
+          } catch (_) {}
+        };
+        await tryFetch('https://pay-api.ds.163.com/api/nlogin', {
+          method: 'GET',
+          credentials: 'include',
+        });
+        await tryFetch('https://inf.ds.163.com/v1/web/cooperate/plutus/cookie-exchange', {
+          method: 'GET',
+          credentials: 'include',
+        });
+      });
+      await this.page.waitForTimeout(800);
+    } catch (_) {}
+
+    for (let i = 0; i < 10; i++) {
+      const cookies = await this.context.cookies();
+      const map = cookieListToMap(cookies);
+      if (map.GOD_UUID || map.NTES_plutus_online_front || map.NTES_plutus_p_info_online) {
+        return;
+      }
+      // 已有 URS 会话也继续等一会换票
+      if (!(map.NTES_YD_SESS || map.NTES_SESS || map.P_INFO || map.S_INFO)) {
+        return;
+      }
+      await this.page.waitForTimeout(800);
+    }
+  }
+
+  async _probeFromBrowser() {
+    const empty = { self: null, getInfo: null, localMobile: null };
+    if (!this.page) return empty;
+    try {
+      return await this.page.evaluate(async () => {
+        const out = { self: null, getInfo: null, localMobile: null };
+        const postJson = async (url) => {
+          const r = await fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json;charset=UTF-8' },
+            body: '{}',
+          });
+          return r.json();
+        };
+        try {
+          out.self = await postJson('https://pay-api.ds.163.com/api/self');
+        } catch (e) {
+          out.self = { error: String(e && e.message ? e.message : e) };
+        }
+        try {
+          out.getInfo = await postJson('https://inf.ds.163.com/v1/web/exp/xy/user/get-info');
+        } catch (e) {
+          out.getInfo = { error: String(e && e.message ? e.message : e) };
+        }
+        try {
+          for (const k of Object.keys(localStorage || {})) {
+            const v = String(localStorage.getItem(k) || '');
+            const m = v.match(/1\d{10}/);
+            if (m) {
+              out.localMobile = m[0];
+              break;
+            }
+          }
+          if (!out.localMobile) {
+            const m2 = String(document.cookie || '').match(/1\d{10}/);
+            if (m2) out.localMobile = m2[0];
+          }
+        } catch (_) {}
+        return out;
+      });
+    } catch (_) {
+      return empty;
+    }
+  }
+
+  async _commitSuccess(profile) {
+    const saved = await accountRepo.upsertAccount({
+      ...profile,
+      targetCount: this.targetCount,
+    });
     this.mobile = saved.mobile;
     this.account = {
       mobile: saved.mobile,
       nickname: saved.nickname,
       vipLevel: saved.vipLevel,
+      targetCount: saved.targetCount,
+      successCount: saved.successCount,
     };
     this.status = 'success';
-    this.message = '登录成功，账号已写入数据库';
+    this.message = `登录成功，账号已写入数据库（抢购次数=${saved.targetCount}）`;
     await accountRepo.updateLoginSession(this.token, {
       status: 'success',
       mobile: saved.mobile,
@@ -354,37 +598,123 @@ class RemoteLoginSession {
     await this.close();
   }
 
-  async _buildProfile(cookies) {
+  async _buildProfile(cookies, mobileHint = null, probe = null) {
     const map = cookieListToMap(cookies);
-    const mobile = extractMobile(map);
-    if (!mobile) return null;
+    let mobile =
+      (mobileHint && /^1\d{10}$/.test(mobileHint) ? mobileHint : null) ||
+      extractMobile(map) ||
+      (probe && probe.localMobile) ||
+      extractMobileFromSelf(probe && probe.self);
 
     const session = createSession();
     applyBrowserCookies(session.jar, cookies);
     await ensureXsrf(session.client, session.jar);
 
-    const hasGod = session.jar
-      .getCookiesSync('https://pay.ds.163.com/')
-      .some((c) => c.key === 'GOD_UUID' && c.value);
+    const readJar = (name) => {
+      for (const url of [
+        'https://pay.ds.163.com/',
+        'https://pay-api.ds.163.com/',
+        'https://inf.ds.163.com/',
+        'https://www.163.com/',
+      ]) {
+        try {
+          const hit = session.jar.getCookiesSync(url).find((c) => c.key === name);
+          if (hit && hit.value) return hit.value;
+        } catch (_) {}
+      }
+      return null;
+    };
+
+    let hasGod = !!readJar('GOD_UUID');
+    const hasPlutus = !!(readJar('NTES_plutus_online_front') || readJar('NTES_plutus_p_info_online'));
+    const hasUrs = !!(readJar('NTES_YD_SESS') || readJar('NTES_SESS') || readJar('P_INFO'));
+
     if (!hasGod) {
       await session.client.get(`${C.PAY_API}/api/nlogin`, { params: {} }).catch(() => {});
-      applyBrowserCookies(session.jar, await this.context.cookies());
+      try {
+        await session.client.get(
+          `${C.INF}/v1/web/cooperate/plutus/cookie-exchange`
+        );
+      } catch (_) {}
+      if (this.context) {
+        applyBrowserCookies(session.jar, await this.context.cookies());
+      }
       await ensureXsrf(session.client, session.jar);
+      hasGod = !!readJar('GOD_UUID');
     }
 
-    const selfRes = await session.client.post(`${C.PAY_API}/api/self`, {});
-    const selfData = selfRes.data || {};
-    const selfOk =
-      selfData.code === 0 ||
-      selfData.code === 200 ||
-      selfData.msg === 'ok' ||
-      !!(selfData.result || selfData.data);
+    if (hasGod) {
+      session.client.defaults.headers.common['gl-uid'] = readJar('GOD_UUID');
+      session.client.defaults.headers.common['GL-Uid'] = readJar('GOD_UUID');
+    }
 
-    if (!selfOk && !hasGod) return null;
+    let selfData = (probe && probe.self) || null;
+    let selfOk = isSelfOk(selfData);
+    if (!selfOk) {
+      const selfRes = await session.client.post(`${C.PAY_API}/api/self`, {});
+      selfData = selfRes.data || {};
+      selfOk = isSelfOk(selfData);
+    }
 
-    const { LoginService } = require('./loginService');
+    if (!mobile) {
+      mobile = extractMobileFromSelf(selfData);
+    }
+
+    // 账号密码登录：允许用「用户填写的手机号」作为入库主键，只要会话有效
+    const sessionOk = hasGod || hasPlutus || hasUrs || selfOk;
+    if (!sessionOk) {
+      console.warn('[login] extract session invalid', {
+        hasGod,
+        hasPlutus,
+        hasUrs,
+        selfOk,
+        selfCode: selfData && selfData.code,
+      });
+      return null;
+    }
+    if (!mobile) {
+      console.warn('[login] extract no mobile', {
+        accountHint: extractAccountHint(map),
+        selfSnippet: JSON.stringify(selfData || {}).slice(0, 240),
+      });
+      return null;
+    }
+
+    const { LoginService, normalizeVipLevel } = require('./loginService');
     const svc = new LoginService(session);
-    return svc.fetchProfile(mobile);
+    try {
+      return await svc.fetchProfile(mobile);
+    } catch (e) {
+      console.warn(`[login] fetchProfile 失败，使用兜底资料: ${e.message || e}`);
+    }
+
+    // 兜底：浏览器 probe / self 拼一份可入库资料
+    const vipData = (probe && probe.getInfo) || {};
+    const vipResult = vipData.result || vipData.data || {};
+    const selfResult =
+      (selfData && (selfData.result || selfData.data)) || selfData || {};
+    const { jarToJSON } = require('./http');
+    return {
+      mobile: String(mobile),
+      nickname: String(
+        selfResult.nick ||
+          selfResult.nickname ||
+          selfResult.nickName ||
+          selfResult.name ||
+          mobile
+      ),
+      vipLevel: normalizeVipLevel(
+        vipResult.currentLv || vipResult.level || vipResult.vipLevel || 'V1'
+      ),
+      uid: selfResult.uid || selfResult.userId || null,
+      godUuid: readJar('GOD_UUID'),
+      deviceId: session.deviceId,
+      cookies: jarToJSON(session.jar),
+      cookieHeader: session.jar.getCookieStringSync('https://pay.ds.163.com/'),
+      vipRaw: vipData,
+      selfRaw: selfData,
+      loggedInAt: new Date().toISOString(),
+    };
   }
 
   async close() {
@@ -407,13 +737,14 @@ class SessionManager {
     this.sessions = new Map();
   }
 
-  async create() {
+  async create({ targetCount } = {}) {
     const token = crypto.randomBytes(16).toString('hex');
     const ttl = Number(process.env.LOGIN_SESSION_TTL_MS || 600000);
     const expiresAt = new Date(Date.now() + ttl);
-    await accountRepo.createLoginSession({ token, expiresAt });
+    const quota = accountRepo.normalizeTargetCount(targetCount);
+    await accountRepo.createLoginSession({ token, expiresAt, targetCount: quota });
 
-    const remote = new RemoteLoginSession(token);
+    const remote = new RemoteLoginSession(token, quota);
     this.sessions.set(token, remote);
     try {
       await remote.start();

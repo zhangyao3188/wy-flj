@@ -43,9 +43,16 @@ app.post('/api/login', async (req, res) => {
   try {
     const mobile = String(req.body.mobile || '').trim();
     const code = String(req.body.code || '').trim();
+    const targetCount = accountRepo.normalizeTargetCount(req.body.targetCount);
+    if (req.body.targetCount == null || String(req.body.targetCount).trim() === '') {
+      throw new Error('请填写抢购次数 targetCount');
+    }
+    if (Number(req.body.targetCount) < 1 || !Number.isFinite(Number(req.body.targetCount))) {
+      throw new Error('抢购次数须为大于等于 1 的整数');
+    }
     const svc = getOrCreateService(mobile);
     const result = await svc.login(mobile, code);
-    const saved = await accountRepo.upsertAccount(result.user);
+    const saved = await accountRepo.upsertAccount({ ...result.user, targetCount });
     res.json({
       ok: true,
       message: '登录成功，用户信息已保存',
@@ -54,6 +61,8 @@ app.post('/api/login', async (req, res) => {
         nickname: saved.nickname,
         vipLevel: saved.vipLevel,
         uid: saved.uid,
+        targetCount: saved.targetCount,
+        successCount: saved.successCount,
         updatedAt: saved.updatedAt,
       },
     });
@@ -68,12 +77,19 @@ app.post('/api/login/cookie', async (req, res) => {
     const cookies = req.body.cookies || {};
     if (!mobile) throw new Error('mobile 必填');
     if (!cookies || typeof cookies !== 'object') throw new Error('cookies 必填');
+    if (req.body.targetCount == null || String(req.body.targetCount).trim() === '') {
+      throw new Error('请填写抢购次数 targetCount');
+    }
+    if (Number(req.body.targetCount) < 1 || !Number.isFinite(Number(req.body.targetCount))) {
+      throw new Error('抢购次数须为大于等于 1 的整数');
+    }
+    const targetCount = accountRepo.normalizeTargetCount(req.body.targetCount);
 
     const session = createSession();
     const svc = new LoginService(session);
     sessions.set(mobile, svc);
     const result = await svc.importCookies(mobile, cookies);
-    const saved = await accountRepo.upsertAccount(result.user);
+    const saved = await accountRepo.upsertAccount({ ...result.user, targetCount });
     res.json({
       ok: true,
       message: 'Cookie 登录成功，用户信息已保存',
@@ -82,6 +98,8 @@ app.post('/api/login/cookie', async (req, res) => {
         nickname: saved.nickname,
         vipLevel: saved.vipLevel,
         uid: saved.uid,
+        targetCount: saved.targetCount,
+        successCount: saved.successCount,
         updatedAt: saved.updatedAt,
       },
     });
@@ -98,6 +116,8 @@ app.get('/api/users', async (_req, res) => {
       nickname: u.nickname,
       vipLevel: u.vipLevel,
       uid: u.uid,
+      targetCount: u.targetCount,
+      successCount: u.successCount,
       updatedAt: u.updatedAt,
     }));
     res.json({ ok: true, users });
@@ -117,6 +137,8 @@ app.get('/api/users/:mobile', async (req, res) => {
         nickname: user.nickname,
         vipLevel: user.vipLevel,
         uid: user.uid,
+        targetCount: user.targetCount,
+        successCount: user.successCount,
         updatedAt: user.updatedAt,
       },
     });

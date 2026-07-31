@@ -25,6 +25,8 @@ app.get('/api/users', async (_req, res) => {
       mobile: u.mobile,
       nickname: u.nickname,
       vipLevel: u.vipLevel,
+      successCount: u.successCount,
+      targetCount: u.targetCount,
       updatedAt: u.updatedAt,
     }));
     res.json({ ok: true, users });
@@ -41,8 +43,14 @@ app.post('/api/seckill/start', async (req, res) => {
   try {
     const mobile = String(req.body.mobile || '').trim();
     if (!mobile) throw new Error('mobile 必填');
-    if (!(await accountRepo.findByMobile(mobile))) {
+    const user = await accountRepo.findByMobile(mobile);
+    if (!user) {
       throw new Error('用户未登录，请先调用 login 服务');
+    }
+    if (user.completed || user.successCount >= user.targetCount) {
+      throw new Error(
+        `该账号已完成设定抢购次数（${user.successCount}/${user.targetCount}），已跳过`
+      );
     }
     if (jobs.get(mobile)?.running) {
       return res.status(409).json({ ok: false, message: '该用户抢购任务已在运行' });

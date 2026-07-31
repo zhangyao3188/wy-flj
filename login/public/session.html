@@ -113,6 +113,18 @@
       line-height: 1.5;
       text-align: center;
     }
+    button.extract {
+      width: 100%;
+      background: linear-gradient(135deg, #12b76a, #039855);
+      min-width: 0;
+    }
+    button.extract:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+    .mobile-row input {
+      flex: 1;
+    }
   </style>
 </head>
 <body>
@@ -124,11 +136,15 @@
       <button id="sendClear" type="button" class="secondary">清空</button>
       <button id="sendEnter" type="button" class="secondary">回车</button>
     </div>
+    <div class="row mobile-row">
+      <input id="mobileHint" type="text" placeholder="选填手机号（账号密码登录识别不到时可填）" inputmode="numeric" maxlength="11" />
+      <button id="btnExtract" type="button" class="extract">提取并入库</button>
+    </div>
   </div>
   <div class="screen-wrap">
     <img id="frame" alt="登录画面" draggable="false" />
   </div>
-  <p class="tip">输错了：再点一下该输入框 → 点「清空」→ 重新输入后点「输入」（会覆盖原内容）。</p>
+  <p class="tip">账号密码登录后点「提取并入库」。若提示缺手机号，填绑定手机号再提取（密码登录 Cookie 里经常没有手机号）。</p>
   <script>
     const params = new URLSearchParams(location.search);
     const token = params.get('token');
@@ -272,12 +288,49 @@
       if (e.key === 'Enter') sendType();
     });
 
+    const btnExtract = document.getElementById('btnExtract');
+    const mobileHint = document.getElementById('mobileHint');
+    btnExtract.addEventListener('click', async () => {
+      btnExtract.disabled = true;
+      statusEl.className = 'status';
+      statusEl.textContent = '正在提取账号信息…';
+      try {
+        const body = {};
+        const m = String(mobileHint.value || '').trim();
+        if (m) body.mobile = m;
+        const res = await fetch('/api/login/session/' + token + '/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          throw new Error(data.message || '提取失败');
+        }
+        statusEl.className = 'status ok';
+        statusEl.textContent =
+          '提取成功：' +
+          (data.mobile || '') +
+          '（' +
+          ((data.account && data.account.vipLevel) || '') +
+          '）已写入数据库，可关闭本页';
+      } catch (e) {
+        statusEl.className = 'status err';
+        statusEl.textContent = e.message || String(e);
+        btnExtract.disabled = false;
+        refreshFrame();
+      }
+    });
+
     refreshFrame();
     setInterval(refreshFrame, 700);
     (async function loop() {
       for (;;) {
         const done = await pollStatus();
-        if (done) break;
+        if (done) {
+          btnExtract.disabled = true;
+          break;
+        }
         await new Promise((r) => setTimeout(r, 1500));
       }
     })();

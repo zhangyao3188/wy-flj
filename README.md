@@ -46,7 +46,18 @@ npm install
 npm run dev
 ```
 
-立即测试（模拟 5s 倒计时后开火）：`npm run test:now`
+立即测试（默认 5s 倒计时后开火）：
+
+```bash
+npm run test:now
+```
+
+指定开抢时间（按服务器时间倒计时，末 10s 毫秒显示）：
+
+```bash
+npm run test:now -- --at 12:05:00
+npm run test:now -- --at "2026-07-31 12:05:00"
+```
 
 ## 抢购间隔
 

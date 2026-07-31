@@ -103,7 +103,7 @@ function attachGlHeaders(client, jar, { deviceId, godUuid }) {
       }
     }
 
-    config.metadata = { startAt: Date.now() };
+    config.metadata = { startAt: nowMs() };
     return config;
   });
 }
@@ -138,11 +138,29 @@ function buildUrl(config) {
   return `${base}${url}`;
 }
 
+/** 校准后的服务器时间戳 → 精确到毫秒的可读字符串 */
+function formatServerTime(ms) {
+  const t = Number(ms);
+  const d = new Date(Number.isFinite(t) ? t : nowMs());
+  const pad = (n, w = 2) => String(n).padStart(w, '0');
+  return (
+    `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(
+      d.getMilliseconds(),
+      3
+    )}`
+  );
+}
+
 function logHttpExchange(writer, config, response, error) {
   if (!writer) return;
   const sep = '============================================================';
-  const startAt = (config && config.metadata && config.metadata.startAt) || Date.now();
-  const time = new Date(startAt).toLocaleString('zh-CN', { hour12: false });
+  const startAt =
+    (config && config.metadata && config.metadata.startAt) != null
+      ? config.metadata.startAt
+      : nowMs();
+  const endAt = nowMs();
+  const costMs = Math.max(0, endAt - startAt);
   const method = String((config && config.method) || 'get').toUpperCase();
   const reqPath = config ? buildUrl(config) : '';
   const params = {
@@ -167,7 +185,9 @@ function logHttpExchange(writer, config, response, error) {
   writer.write(
     [
       sep,
-      `[请求时间] ${time}`,
+      `[请求时间] ${formatServerTime(startAt)}`,
+      `[响应时间] ${formatServerTime(endAt)}`,
+      `[耗时] ${costMs}ms`,
       `[请求路径] ${reqPath}`,
       `[请求方式] ${method}`,
       `[请求参数] ${JSON.stringify(params)}`,
@@ -611,6 +631,7 @@ module.exports = {
   waitUntil,
   toMs,
   readCookie,
+  formatServerTime,
   LOG_DIR,
   ACT_INFO_ID,
 };

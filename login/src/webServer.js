@@ -30,14 +30,23 @@ app.get('/health', async (_req, res) => {
   }
 });
 
-app.post('/api/login/session', async (_req, res) => {
+app.post('/api/login/session', async (req, res) => {
   try {
-    const remote = await manager.create();
+    const raw = req.body && req.body.targetCount;
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+      return res.status(400).json({ ok: false, message: '请填写抢购次数' });
+    }
+    const targetCount = accountRepo.normalizeTargetCount(raw);
+    if (Number(raw) < 1 || !Number.isFinite(Number(raw))) {
+      return res.status(400).json({ ok: false, message: '抢购次数须为大于等于 1 的整数' });
+    }
+    const remote = await manager.create({ targetCount });
     const url = `${PUBLIC_URL}/session.html?token=${remote.token}`;
     res.json({
       ok: true,
       token: remote.token,
       url,
+      targetCount,
       message: '请打开链接，在画面中完成网易登录',
     });
   } catch (e) {
@@ -92,6 +101,22 @@ app.post('/api/login/session/:token/input', async (req, res) => {
   }
 });
 
+/** 手动提取当前浏览器登录态并写入数据库（账号密码登录兜底） */
+app.post('/api/login/session/:token/extract', async (req, res) => {
+  const remote = manager.get(req.params.token);
+  if (!remote) {
+    return res.status(404).json({ ok: false, message: '会话不存在或已结束' });
+  }
+  try {
+    const result = await remote.extractAndSave({
+      mobile: req.body && req.body.mobile,
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
 app.get('/api/accounts', async (_req, res) => {
   try {
     const list = await accountRepo.listActiveAccounts();
@@ -103,6 +128,7 @@ app.get('/api/accounts', async (_req, res) => {
         nickname: a.nickname,
         vipLevel: a.vipLevel,
         successCount: a.successCount || 0,
+        targetCount: a.targetCount || 1,
         loggedInAt: a.loggedInAt,
         updatedAt: a.updatedAt,
       })),

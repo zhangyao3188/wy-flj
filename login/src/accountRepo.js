@@ -1,5 +1,11 @@
 const db = require('./db');
 
+function normalizeTargetCount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(Math.floor(n), 9999);
+}
+
 function rowToUser(row) {
   if (!row) return null;
   let cookies = [];
@@ -31,6 +37,7 @@ function rowToUser(row) {
     selfRaw,
     status: row.status,
     successCount: Number(row.success_count) || 0,
+    targetCount: normalizeTargetCount(row.target_count),
     loggedInAt: row.logged_in_at,
     updatedAt: row.updated_at,
   };
@@ -38,11 +45,12 @@ function rowToUser(row) {
 
 async function upsertAccount(user) {
   const mobile = String(user.mobile);
+  const targetCount = normalizeTargetCount(user.targetCount);
   const sql = `
     INSERT INTO accounts (
       mobile, nickname, vip_level, uid, god_uuid, device_id,
-      cookies_json, cookie_header, vip_raw, self_raw, status, logged_in_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      cookies_json, cookie_header, vip_raw, self_raw, status, target_count, logged_in_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
     ON DUPLICATE KEY UPDATE
       nickname = VALUES(nickname),
       vip_level = VALUES(vip_level),
@@ -54,6 +62,7 @@ async function upsertAccount(user) {
       vip_raw = VALUES(vip_raw),
       self_raw = VALUES(self_raw),
       status = 1,
+      target_count = VALUES(target_count),
       logged_in_at = VALUES(logged_in_at)
   `;
   await db.query(sql, [
@@ -67,6 +76,7 @@ async function upsertAccount(user) {
     user.cookieHeader || null,
     user.vipRaw ? JSON.stringify(user.vipRaw) : null,
     user.selfRaw ? JSON.stringify(user.selfRaw) : null,
+    targetCount,
     user.loggedInAt ? new Date(user.loggedInAt) : new Date(),
   ]);
   return findByMobile(mobile);
@@ -86,10 +96,10 @@ async function listActiveAccounts() {
   return rows.map(rowToUser);
 }
 
-async function createLoginSession({ token, expiresAt }) {
+async function createLoginSession({ token, expiresAt, targetCount }) {
   await db.query(
-    `INSERT INTO login_sessions (token, status, expires_at) VALUES (?, 'pending', ?)`,
-    [token, expiresAt]
+    `INSERT INTO login_sessions (token, status, target_count, expires_at) VALUES (?, 'pending', ?, ?)`,
+    [token, normalizeTargetCount(targetCount), expiresAt]
   );
   return findLoginSession(token);
 }
@@ -122,4 +132,5 @@ module.exports = {
   findLoginSession,
   updateLoginSession,
   rowToUser,
+  normalizeTargetCount,
 };

@@ -14,29 +14,39 @@ const {
   resolveAcquireIntervalMs,
   calibrateClock,
   waitUntilServer,
+  resolveTestFireAt,
   FIRE_EARLY_MS,
   WARMUP_BEFORE_MS,
   COUNTDOWN_LAST_MS,
-  TEST_COUNTDOWN_MS,
 } = require('./runner');
 
 /**
- * 仅从线上 MySQL accounts 加载账号
+ * 仅从线上 MySQL accounts 加载账号（已完成设定抢购次数的账号会被过滤）
  */
 async function loadAccountsFromDb(mobilesFilter) {
+  await accountRepo.ensureAccountColumns();
   let users;
   if (mobilesFilter && mobilesFilter.length) {
     users = [];
     for (const mobile of mobilesFilter) {
       const u = await accountRepo.findByMobile(mobile);
-      if (u && u.status !== 0) users.push(u);
-      else console.warn(`[dev] 数据库无此可用账号: ${mobile}`);
+      if (!u || u.status === 0) {
+        console.warn(`[dev] 数据库无此可用账号: ${mobile}`);
+        continue;
+      }
+      if (u.completed || u.successCount >= u.targetCount) {
+        console.warn(
+          `[dev] 跳过已完成账号: ${mobile}（成功 ${u.successCount}/${u.targetCount}）`
+        );
+        continue;
+      }
+      users.push(u);
     }
   } else {
     users = await accountRepo.listActiveAccounts();
   }
   if (!users.length) {
-    throw new Error('线上数据库无可用账号，请先通过 login 在线登录');
+    throw new Error('线上数据库无可用账号（可能均已达设定抢购次数），请先通过 login 在线登录');
   }
   return users;
 }
@@ -46,8 +56,6 @@ async function runMulti(options = {}) {
   const fireEarlyMs = options.fireEarlyMs != null ? options.fireEarlyMs : FIRE_EARLY_MS;
   const warmupBeforeMs =
     options.warmupBeforeMs != null ? options.warmupBeforeMs : WARMUP_BEFORE_MS;
-  const testCountdownMs =
-    options.testCountdownMs != null ? options.testCountdownMs : TEST_COUNTDOWN_MS;
 
   const users = await loadAccountsFromDb(options.mobiles);
   const mobiles = users.map((u) => u.mobile);
@@ -56,8 +64,15 @@ async function runMulti(options = {}) {
   console.log('==============================');
   console.log('   多账号并行抢购（线上数据库）');
   console.log('==============================');
-  console.log(`[dev] 账号数=${mobiles.length}${immediate ? ' [测试倒计时抢]' : ''}`);
-  console.log(`[dev] 账号: ${mobiles.join(', ')}`);
+  const modeLabel = immediate
+    ? options.testStartAt || options.testStartAtMs
+      ? ' [测试指定时间]'
+      : ' [测试倒计时抢]'
+    : '';
+  console.log(`[dev] 账号数=${mobiles.length}${modeLabel}`);
+  console.log(
+    `[dev] 账号: ${users.map((u) => `${u.mobile}(${u.successCount}/${u.targetCount})`).join(', ')}`
+  );
   const intervalMs = resolveAcquireIntervalMs(options);
   console.log(
     `[dev] 启动预热 + 开抢前 ${warmupBeforeMs / 1000}s 再预热；成功即停；轮询间隔=${intervalMs}ms；末${COUNTDOWN_LAST_MS / 1000}s毫秒倒计时`
@@ -149,14 +164,17 @@ async function runMulti(options = {}) {
       await waitUntilServer(wakeAt, { label: '开抢倒计时' });
     }
   } else {
-    const fireAt = nowMs() + testCountdownMs;
-    console.log(
-      `[dev] 测试模式：模拟倒计时 ${testCountdownMs}ms 后并行开火（服务器时间）`
-    );
-    await waitUntil(fireAt, {
-      label: '测试倒计时',
-      countdownLastMs: testCountdownMs,
-    });
+    const fireAt = resolveTestFireAt(options, nowMs());
+    const left = fireAt - nowMs();
+    const atText = new Date(fireAt).toLocaleString('zh-CN', { hour12: false });
+    if (left <= 0) {
+      console.log(`[dev] 测试模式：指定时间 ${atText} 已过，立即并行开火`);
+    } else {
+      console.log(
+        `[dev] 测试模式：等待到 ${atText} 并行开火（约 ${formatLeft(left)}，服务器时间）`
+      );
+      await waitUntilServer(fireAt, { label: '测试倒计时' });
+    }
   }
 
   const toFire = prepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
@@ -232,21 +250,42 @@ async function runMulti(options = {}) {
 
 function parseCliArgs(argv) {
   const args = argv.slice(2);
-  const flags = new Set(args.filter((a) => a.startsWith('-')));
-  const positional = args.filter((a) => !a.startsWith('-'));
-  const immediate =
-    flags.has('--now') ||
-    flags.has('-n') ||
-    flags.has('--immediate') ||
-    flags.has('--test') ||
-    process.env.SECKILL_IMMEDIATE === '1';
+  const positional = [];
+  let testStartAt;
   let maxAttempts;
-  const maxIdx = args.findIndex((a) => a === '--max' || a === '--max-attempts');
-  if (maxIdx >= 0 && args[maxIdx + 1]) maxAttempts = Number(args[maxIdx + 1]);
+  const flagSet = new Set();
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--at' || a === '--start' || a === '--start-at') {
+      testStartAt = args[++i];
+      continue;
+    }
+    if (a.startsWith('--at=') || a.startsWith('--start=') || a.startsWith('--start-at=')) {
+      testStartAt = a.slice(a.indexOf('=') + 1);
+      continue;
+    }
+    if (a === '--max' || a === '--max-attempts') {
+      maxAttempts = Number(args[++i]);
+      continue;
+    }
+    if (a.startsWith('-')) {
+      flagSet.add(a);
+      continue;
+    }
+    positional.push(a);
+  }
+  const immediate =
+    flagSet.has('--now') ||
+    flagSet.has('-n') ||
+    flagSet.has('--immediate') ||
+    flagSet.has('--test') ||
+    !!testStartAt ||
+    process.env.SECKILL_IMMEDIATE === '1';
   return {
     mobiles: positional.length ? positional : null,
     immediate,
     maxAttempts: Number.isFinite(maxAttempts) ? maxAttempts : undefined,
+    testStartAt: testStartAt || process.env.SECKILL_TEST_START_AT || undefined,
   };
 }
 
@@ -258,6 +297,7 @@ if (require.main === module) {
     mobiles: cli.mobiles,
     immediate: cli.immediate,
     ...(cli.maxAttempts != null ? { maxAttempts: cli.maxAttempts } : {}),
+    ...(cli.testStartAt ? { testStartAt: cli.testStartAt } : {}),
   })
     .then((r) => {
       process.exit((r.results || []).some((x) => x.success) ? 0 : 2);

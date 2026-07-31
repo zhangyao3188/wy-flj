@@ -51,7 +51,34 @@
       margin-bottom: 14px;
     }
     h1 { margin: 0 0 10px; font-size: 1.55rem; letter-spacing: 0.01em; }
-    p { color: var(--muted); line-height: 1.65; margin: 0 0 22px; font-size: 0.95rem; }
+    p { color: var(--muted); line-height: 1.65; margin: 0 0 18px; font-size: 0.95rem; }
+    label {
+      display: block;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .field { margin-bottom: 18px; }
+    input[type="number"] {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px 14px;
+      font-size: 1.05rem;
+      color: var(--text);
+      outline: none;
+      background: #fff;
+    }
+    input[type="number"]:focus {
+      border-color: #f5a09a;
+      box-shadow: 0 0 0 3px rgba(230, 0, 18, 0.12);
+    }
+    .field-hint {
+      margin-top: 8px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
     button {
       width: 100%;
       border: 0;
@@ -73,19 +100,43 @@
   <div class="panel">
     <div class="brand">福利金账号</div>
     <h1>登录网易账号</h1>
-    <p>点击下方按钮开始。将打开官方登录画面，请输入手机号与验证码；若出现滑块，请在画面中完成。登录成功后自动保存，可用于抢购。</p>
+    <p>先填写本账号要抢购的次数，再开始登录。成功次数达到设定值后，该账号将不再参与抢购。</p>
+    <div class="field">
+      <label for="targetCount">抢购次数 <span style="color:var(--accent)">*</span></label>
+      <input id="targetCount" type="number" min="1" max="9999" step="1" required placeholder="例如 1" />
+      <div class="field-hint">必填，整数，至少为 1。旧账号未填写时默认为 1 次。</div>
+    </div>
     <button id="btn" type="button">开始登录</button>
     <div class="hint" id="msg"></div>
   </div>
   <script>
     const btn = document.getElementById('btn');
     const msg = document.getElementById('msg');
+    const targetInput = document.getElementById('targetCount');
     btn.addEventListener('click', async () => {
+      const raw = String(targetInput.value || '').trim();
+      if (!raw) {
+        msg.className = 'hint err';
+        msg.textContent = '请填写抢购次数';
+        targetInput.focus();
+        return;
+      }
+      const targetCount = Number(raw);
+      if (!Number.isFinite(targetCount) || targetCount < 1 || !Number.isInteger(targetCount)) {
+        msg.className = 'hint err';
+        msg.textContent = '抢购次数须为大于等于 1 的整数';
+        targetInput.focus();
+        return;
+      }
       btn.disabled = true;
       msg.className = 'hint';
       msg.textContent = '正在创建登录会话…';
       try {
-        const res = await fetch('/api/login/session', { method: 'POST' });
+        const res = await fetch('/api/login/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetCount }),
+        });
         const data = await res.json();
         if (!data.ok) throw new Error(data.message || '创建失败');
         location.href = data.url;
