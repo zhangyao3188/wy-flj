@@ -15,6 +15,7 @@ const {
   calibrateClock,
   waitUntilServer,
   resolveTestFireAt,
+  resolveFireEarlyMs,
   FIRE_EARLY_MS,
   WARMUP_BEFORE_MS,
   COUNTDOWN_LAST_MS,
@@ -53,7 +54,7 @@ async function loadAccountsFromDb(mobilesFilter) {
 
 async function runMulti(options = {}) {
   const immediate = !!options.immediate;
-  const fireEarlyMs = options.fireEarlyMs != null ? options.fireEarlyMs : FIRE_EARLY_MS;
+  const fireEarlyMs = resolveFireEarlyMs(options);
   const warmupBeforeMs =
     options.warmupBeforeMs != null ? options.warmupBeforeMs : WARMUP_BEFORE_MS;
 
@@ -75,7 +76,7 @@ async function runMulti(options = {}) {
   );
   const intervalMs = resolveAcquireIntervalMs(options);
   console.log(
-    `[dev] 启动预热 + 开抢前 ${warmupBeforeMs / 1000}s 再预热；成功即停；轮询间隔=${intervalMs}ms；末${COUNTDOWN_LAST_MS / 1000}s毫秒倒计时`
+    `[dev] 启动预热 + 开抢前 ${warmupBeforeMs / 1000}s 再预热；成功即停；轮询间隔=${intervalMs}ms；提前开火 FIRE_EARLY_MS=${fireEarlyMs}ms；末${COUNTDOWN_LAST_MS / 1000}s毫秒倒计时`
   );
   console.log('');
 
@@ -155,23 +156,63 @@ async function runMulti(options = {}) {
       if (alive) await calibrateClock(alive.client, '[dev] ');
     }
 
+    // 在开火前预留窗口刷 XSRF，再到点立刻 acquire（避免吃掉 FIRE_EARLY_MS）
+    const preFire = prepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
+    const xsrfAt = wakeAt - Math.max(1500, fireEarlyMs + 500);
+    if (preFire.length && nowMs() < xsrfAt) {
+      await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
+    }
+    if (preFire.length) {
+      await Promise.all(
+        preFire.map(async (account) => {
+          try {
+            await ensureXsrf(account.client, account.jar);
+          } catch (e) {
+            console.warn(`[dev] ${account.mobile} 预刷 XSRF 失败: ${e.message || e}`);
+          }
+        })
+      );
+    }
+
     if (nowMs() < wakeAt) {
       console.log(
-        `[dev] 二次预热完成，最早开火约 ${formatLeft(wakeAt - nowMs())} 后；末 ${
+        `[dev] 已预刷 XSRF，最早开火约 ${formatLeft(wakeAt - nowMs())} 后（提前 ${fireEarlyMs}ms）；末 ${
           COUNTDOWN_LAST_MS / 1000
         }s 毫秒倒计时`
       );
       await waitUntilServer(wakeAt, { label: '开抢倒计时' });
     }
   } else {
-    const fireAt = resolveTestFireAt(options, nowMs());
+    const scheduledAt = resolveTestFireAt(options, nowMs());
+    const fireAt = scheduledAt - fireEarlyMs;
+    const schedText = new Date(scheduledAt).toLocaleString('zh-CN', { hour12: false });
+    const fireText = `${new Date(fireAt).toLocaleString('zh-CN', {
+      hour12: false,
+    })}.${String(fireAt % 1000).padStart(3, '0')}`;
+    const preFire = prepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
+    const xsrfAt = fireAt - Math.max(1500, fireEarlyMs + 500);
+    if (preFire.length && nowMs() < xsrfAt) {
+      await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
+    }
+    await Promise.all(
+      preFire.map(async (account) => {
+        try {
+          await ensureXsrf(account.client, account.jar);
+        } catch (e) {
+          console.warn(`[dev] ${account.mobile} 预刷 XSRF 失败: ${e.message || e}`);
+        }
+      })
+    );
     const left = fireAt - nowMs();
-    const atText = new Date(fireAt).toLocaleString('zh-CN', { hour12: false });
     if (left <= 0) {
-      console.log(`[dev] 测试模式：指定时间 ${atText} 已过，立即并行开火`);
+      console.log(
+        `[dev] 测试模式：目标 ${schedText}（提前 ${fireEarlyMs}ms → ${fireText}）已过，立即并行开火`
+      );
     } else {
       console.log(
-        `[dev] 测试模式：等待到 ${atText} 并行开火（约 ${formatLeft(left)}，服务器时间）`
+        `[dev] 测试模式：目标 ${schedText}，提前 ${fireEarlyMs}ms 于 ${fireText} 并行开火（约 ${formatLeft(
+          left
+        )}，服务器时间）`
       );
       await waitUntilServer(fireAt, { label: '测试倒计时' });
     }
@@ -199,7 +240,6 @@ async function runMulti(options = {}) {
               quiet: toFire.length > 1,
             });
           }
-          await ensureXsrf(account.client, account.jar);
         }
         console.log(`[${account.mobile}] 开火 couponId=${account.ready.couponId}`);
         const result = await fireLoop(account.client, account.ready, account.target, {

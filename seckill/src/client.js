@@ -38,10 +38,20 @@ function createLogWriter(mobile) {
   const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const safeMobile = String(mobile || 'unknown').replace(/\W/g, '');
   const filePath = path.join(LOG_DIR, `seckill-${safeMobile}-${day}.log`);
+  /** 串行异步写盘，不阻塞抢购请求链路 */
+  let writeChain = Promise.resolve();
   return {
     filePath,
     write(text) {
-      fs.appendFileSync(filePath, text.endsWith('\n') ? text : `${text}\n`, 'utf8');
+      const line = text.endsWith('\n') ? text : `${text}\n`;
+      writeChain = writeChain
+        .then(() => fs.promises.appendFile(filePath, line, 'utf8'))
+        .catch((e) => {
+          console.error(`[log] ${safeMobile} 写盘失败: ${e.message || e}`);
+        });
+    },
+    flush() {
+      return writeChain;
     },
   };
 }
@@ -202,11 +212,39 @@ function logHttpExchange(writer, config, response, error) {
 function attachHttpLogger(client, writer) {
   client.interceptors.response.use(
     (response) => {
-      logHttpExchange(writer, response.config, response, null);
+      // 序列化 + 写盘全部延后，避免拖慢下一发 acquire
+      const cfg = response.config;
+      const status = response.status;
+      const data = response.data;
+      setImmediate(() => {
+        try {
+          logHttpExchange(writer, cfg, { status, data }, null);
+        } catch (e) {
+          console.error(`[log] 记录响应失败: ${e.message || e}`);
+        }
+      });
       return response;
     },
     (error) => {
-      logHttpExchange(writer, error.config || {}, error.response, error);
+      const cfg = error.config || {};
+      const resp = error.response;
+      const errSnap = {
+        message: error.message || String(error),
+        code: error.code,
+      };
+      setImmediate(() => {
+        try {
+          const fakeErr = Object.assign(new Error(errSnap.message), { code: errSnap.code });
+          logHttpExchange(
+            writer,
+            cfg,
+            resp ? { status: resp.status, data: resp.data } : null,
+            fakeErr
+          );
+        } catch (e) {
+          console.error(`[log] 记录错误失败: ${e.message || e}`);
+        }
+      });
       return Promise.reject(error);
     }
   );

@@ -29,8 +29,17 @@ const {
   sleep,
 } = require('./client');
 
-/** 开抢前多少毫秒开始发请求 */
-const FIRE_EARLY_MS = 100;
+/** 开抢前多少毫秒开始发 acquire（可用 env FIRE_EARLY_MS 覆盖，默认 100） */
+function resolveFireEarlyMs(options = {}) {
+  if (options.fireEarlyMs != null && Number.isFinite(Number(options.fireEarlyMs))) {
+    return Math.max(0, Number(options.fireEarlyMs));
+  }
+  const fromEnv = Number(process.env.FIRE_EARLY_MS);
+  if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv;
+  return 100;
+}
+
+const FIRE_EARLY_MS = resolveFireEarlyMs();
 /** 开抢前多少毫秒再预热一遍 */
 const WARMUP_BEFORE_MS = 15000;
 /** 正式倒计时展示窗口（末 N 毫秒精确到 ms） */
@@ -350,27 +359,26 @@ async function fireLoop(client, ready, target, options = {}) {
       const code = resp && resp.code;
       const msg = (resp && (resp.errmsg || resp.message)) || '';
 
-      // 成功结构：code=200 + result.received=true → 立刻停该账号，并计入成功次数
+      // 成功结构：code=200 + result.received=true → 立刻停该账号；成功次数异步写库，不阻塞
       if (isAcquireSuccess(resp)) {
         success = true;
         stopReason = 'acquired';
         const mobile = (user && user.mobile) || options.tag;
+        console.log(
+          `${tag}[seckill] SUCCESS #${attempt} ${cost}ms received=true → 停止该账号`
+        );
         if (mobile) {
-          try {
-            await accountRepo.ensureSuccessCountColumn();
-            successCount = await accountRepo.incrementSuccessCount(mobile);
-            console.log(
-              `${tag}[seckill] SUCCESS #${attempt} ${cost}ms received=true → 停止该账号，成功次数=${successCount}`
-            );
-          } catch (e) {
-            console.log(
-              `${tag}[seckill] SUCCESS #${attempt} ${cost}ms received=true → 停止该账号（写库失败: ${e.message || e}）`
-            );
-          }
-        } else {
-          console.log(
-            `${tag}[seckill] SUCCESS #${attempt} ${cost}ms received=true → 停止该账号`
-          );
+          accountRepo
+            .incrementSuccessCount(mobile)
+            .then((n) => {
+              successCount = n;
+              console.log(`${tag}[seckill] 成功次数已异步写入 successCount=${n}`);
+            })
+            .catch((e) => {
+              console.warn(
+                `${tag}[seckill] 成功次数异步写库失败: ${e.message || e}`
+              );
+            });
         }
         break;
       }
@@ -488,7 +496,7 @@ async function prepareAccount(mobile, options = {}) {
  */
 async function runSeckill(mobile, options = {}) {
   const immediate = !!options.immediate;
-  const fireEarlyMs = options.fireEarlyMs != null ? options.fireEarlyMs : FIRE_EARLY_MS;
+  const fireEarlyMs = resolveFireEarlyMs(options);
   const warmupBeforeMs =
     options.warmupBeforeMs != null ? options.warmupBeforeMs : WARMUP_BEFORE_MS;
 
@@ -532,18 +540,31 @@ async function runSeckill(mobile, options = {}) {
   }
 
   if (immediate) {
-    const fireAt = resolveTestFireAt(options, nowMs());
+    const scheduledAt = resolveTestFireAt(options, nowMs());
+    const fireAt = scheduledAt - fireEarlyMs;
+    const schedText = new Date(scheduledAt).toLocaleString('zh-CN', { hour12: false });
+    const fireText = `${new Date(fireAt).toLocaleString('zh-CN', {
+      hour12: false,
+    })}.${String(fireAt % 1000).padStart(3, '0')}`;
+    // XSRF 在倒计时前刷完，避免吃掉开火提前量
+    const xsrfAt = fireAt - Math.max(1500, fireEarlyMs + 500);
+    if (nowMs() < xsrfAt) {
+      await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
+    }
+    await ensureXsrf(account.client, account.jar);
     const left = fireAt - nowMs();
-    const atText = new Date(fireAt).toLocaleString('zh-CN', { hour12: false });
     if (left <= 0) {
-      console.log(`[seckill] 测试模式：指定时间 ${atText} 已过，立即开火`);
+      console.log(
+        `[seckill] 测试模式：目标 ${schedText}（提前 ${fireEarlyMs}ms → ${fireText}）已过，立即开火`
+      );
     } else {
       console.log(
-        `[seckill] 测试模式：等待到 ${atText} 开火（约 ${formatLeft(left)}，服务器时间）`
+        `[seckill] 测试模式：目标 ${schedText}，提前 ${fireEarlyMs}ms 于 ${fireText} 开火（约 ${formatLeft(
+          left
+        )}，服务器时间）`
       );
       await waitUntilServer(fireAt, { label: '测试倒计时' });
     }
-    await ensureXsrf(account.client, account.jar);
   } else {
     const startMs = account.ready.seckillStartTime;
     const warmAt = startMs - warmupBeforeMs;
@@ -576,23 +597,31 @@ async function runSeckill(mobile, options = {}) {
       await calibrateClock(account.client);
     }
 
+    // 开火前刷好 XSRF，到点立刻发 acquire（不再在 fireAt 之后请求）
+    const xsrfAt = fireAt - Math.max(1500, fireEarlyMs + 500);
+    if (nowMs() < xsrfAt) {
+      await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
+    }
+    await ensureXsrf(account.client, account.jar);
+
     if (nowMs() < fireAt) {
       console.log(
         `[seckill] 预热完成，将在开抢前 ${fireEarlyMs}ms 开火（约 ${formatLeft(
           fireAt - nowMs()
-        )} 后）；末 ${COUNTDOWN_LAST_MS / 1000}s 毫秒倒计时`
+        )} 后，目标 ${new Date(fireAt).toLocaleString('zh-CN', {
+          hour12: false,
+        })}.${String(fireAt % 1000).padStart(3, '0')}）；末 ${COUNTDOWN_LAST_MS / 1000}s 毫秒倒计时`
       );
       await waitUntilServer(fireAt, { label: '开抢倒计时' });
     } else {
       console.log('[seckill] 已到/超过开火时刻，立即开始');
     }
-    await ensureXsrf(account.client, account.jar);
   }
 
   console.log(
-    `[seckill] 开始连续抢购${
-      immediate ? '（测试模式）' : `（提前 ${fireEarlyMs}ms）`
-    }…`
+    `[seckill] 开始连续抢购（提前 ${fireEarlyMs}ms，FIRE_EARLY_MS${
+      immediate ? '，测试模式' : ''
+    }）…`
   );
   const intervalMs = resolveAcquireIntervalMs(options);
   if (intervalMs > 0) {
@@ -625,6 +654,7 @@ module.exports = {
   waitUntilServer,
   parseTestStartTime,
   resolveTestFireAt,
+  resolveFireEarlyMs,
   FIRE_EARLY_MS,
   WARMUP_BEFORE_MS,
   COUNTDOWN_LAST_MS,
