@@ -121,7 +121,7 @@ function isSelfOk(selfData) {
 }
 
 /**
- * 远程登录会话：手机视口，方便移动端点击登录框。
+ * 远程登录会话：网页版桌面视口内嵌。
  */
 class RemoteLoginSession {
   constructor(token, targetCount = 1) {
@@ -135,8 +135,8 @@ class RemoteLoginSession {
     this.mobile = null;
     this.account = null;
     this.lastFrame = null;
-    // 手机视口：登录弹窗占满画面，便于手指点击
-    this.viewport = { width: 390, height: 844 };
+    // 网页版桌面视口，与官方 PC 登录页一致
+    this.viewport = { width: 1100, height: 800 };
     this._closed = false;
     this._watchTimer = null;
   }
@@ -154,17 +154,16 @@ class RemoteLoginSession {
     }
     this.context = await this.browser.newContext({
       viewport: this.viewport,
-      isMobile: true,
-      hasTouch: true,
-      // 与截图/点击同一套 CSS 像素，避免 2x 缩放导致点不准
+      isMobile: false,
+      hasTouch: false,
       deviceScaleFactor: 1,
       userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
       locale: 'zh-CN',
     });
     this.page = await this.context.newPage();
     this.status = 'running';
-    this.message = '请在下方画面中完成登录（手机号 / 验证码 / 滑块）';
+    this.message = '请在下方画面中完成登录（网页版：手机号 / 验证码 / 账号密码 / 滑块）';
 
     await this.page.goto('https://pay.ds.163.com/login', {
       waitUntil: 'domcontentloaded',
@@ -223,12 +222,8 @@ class RemoteLoginSession {
     const vp = this.page.viewportSize() || this.viewport;
     const cx = Math.max(0, Math.min(vp.width - 1, Math.round(Number(x) || 0)));
     const cy = Math.max(0, Math.min(vp.height - 1, Math.round(Number(y) || 0)));
-    // 移动端页面更认 touch；再补一次 mouse，兼容部分控件
-    try {
-      await this.page.touchscreen.tap(cx, cy);
-    } catch (_) {
-      await this.page.mouse.click(cx, cy);
-    }
+    // 网页版用鼠标点击
+    await this.page.mouse.click(cx, cy);
     await this.page.waitForTimeout(180);
     // 尽量把焦点落到点击处的输入框（含 iframe）
     try {

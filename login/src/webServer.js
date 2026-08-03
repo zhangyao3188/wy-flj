@@ -117,29 +117,96 @@ app.post('/api/login/session/:token/extract', async (req, res) => {
   }
 });
 
-app.get('/api/accounts', async (_req, res) => {
+app.get('/api/accounts', async (req, res) => {
   try {
-    const list = await accountRepo.listActiveAccounts();
+    const all = String(req.query.all || '') === '1' || String(req.query.all || '') === 'true';
+    const list = all
+      ? await accountRepo.listAllAccounts()
+      : await accountRepo.listActiveAccounts();
+    const accounts = list.map(accountRepo.toPublicAccount);
+    const vipStats = {};
+    for (const a of accounts) {
+      const lv = a.vipLevel || '未知';
+      vipStats[lv] = (vipStats[lv] || 0) + 1;
+    }
     res.json({
       ok: true,
-      accounts: list.map((a) => ({
-        id: a.id,
-        mobile: a.mobile,
-        nickname: a.nickname,
-        vipLevel: a.vipLevel,
-        successCount: a.successCount || 0,
-        targetCount: a.targetCount || 1,
-        loggedInAt: a.loggedInAt,
-        updatedAt: a.updatedAt,
-      })),
+      total: accounts.length,
+      vipStats,
+      accounts,
     });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message || String(e) });
   }
 });
 
+app.get('/api/accounts/:id', async (req, res) => {
+  try {
+    const user = await accountRepo.findById(req.params.id);
+    if (!user) return res.status(404).json({ ok: false, message: '账号不存在' });
+    res.json({ ok: true, account: accountRepo.toPublicAccount(user) });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+/** 更新抢购次数 / 重置成功次数 */
+app.patch('/api/accounts/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id < 1) {
+      return res.status(400).json({ ok: false, message: '无效账号 id' });
+    }
+    const existing = await accountRepo.findById(id);
+    if (!existing) return res.status(404).json({ ok: false, message: '账号不存在' });
+
+    const body = req.body || {};
+    const patch = {};
+    if (body.targetCount !== undefined) {
+      if (body.targetCount == null || String(body.targetCount).trim() === '') {
+        return res.status(400).json({ ok: false, message: '请填写抢购次数' });
+      }
+      if (Number(body.targetCount) < 1 || !Number.isFinite(Number(body.targetCount))) {
+        return res.status(400).json({ ok: false, message: '抢购次数须为大于等于 1 的整数' });
+      }
+      patch.targetCount = body.targetCount;
+    }
+    if (body.successCount !== undefined) patch.successCount = body.successCount;
+    if (body.nickname !== undefined) patch.nickname = body.nickname;
+    if (body.resetSuccess) patch.successCount = 0;
+
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ ok: false, message: '无有效更新字段' });
+    }
+
+    const updated = await accountRepo.updateAccount(id, patch);
+    res.json({ ok: true, account: accountRepo.toPublicAccount(updated) });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+async function handleDeleteAccount(req, res) {
+  try {
+    const deleted = await accountRepo.deleteAccount(req.params.id);
+    if (!deleted) return res.status(404).json({ ok: false, message: '账号不存在' });
+    res.json({
+      ok: true,
+      message: `已删除账号 ${deleted.mobile}`,
+      account: accountRepo.toPublicAccount(deleted),
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message || String(e) });
+  }
+}
+
+app.delete('/api/accounts/:id', handleDeleteAccount);
+/** 兼容部分环境拦截 DELETE：前端优先走此接口 */
+app.post('/api/accounts/:id/delete', handleDeleteAccount);
+
 app.listen(PORT, () => {
   console.log(`[login] 在线登录: ${PUBLIC_URL}`);
+  console.log(`[login] 账号管理: ${PUBLIC_URL}/accounts.html`);
   console.log(`[login] 健康检查: ${PUBLIC_URL}/health`);
   console.log('[login] 登录成功后写入 MySQL accounts 表');
 });

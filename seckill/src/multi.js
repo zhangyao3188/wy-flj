@@ -21,6 +21,25 @@ const {
   COUNTDOWN_LAST_MS,
 } = require('./runner');
 
+/** 准备完成后的等级统计：共 N 个账号，其中 V1 x 个，V2 y 个… */
+function formatVipLevelStats(accounts) {
+  const counts = new Map();
+  for (const a of accounts || []) {
+    const lv = String((a && a.vipLevel) || '未知').toUpperCase();
+    counts.set(lv, (counts.get(lv) || 0) + 1);
+  }
+  const parts = [...counts.entries()]
+    .sort((a, b) => {
+      const na = Number(String(a[0]).replace(/\D/g, ''));
+      const nb = Number(String(b[0]).replace(/\D/g, ''));
+      if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+      return String(a[0]).localeCompare(String(b[0]));
+    })
+    .map(([lv, n]) => `${lv} ${n}个`);
+  const detail = parts.length ? `，其中${parts.join('，')}` : '';
+  return `共 ${accounts.length} 个账号${detail}`;
+}
+
 /**
  * 仅从线上 MySQL accounts 加载账号（已完成设定抢购次数的账号会被过滤）
  */
@@ -116,6 +135,7 @@ async function runMulti(options = {}) {
     );
     if (a.logFile) console.log(`[dev]   日志: ${a.logFile}`);
   }
+  console.log(`[dev] ${formatVipLevelStats(prepared)}`);
   console.log('');
 
   // 任意一个账号校准服务器时间（拿到档位开始时间之后）

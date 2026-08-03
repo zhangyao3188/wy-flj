@@ -96,6 +96,78 @@ async function listActiveAccounts() {
   return rows.map(rowToUser);
 }
 
+/** 全部账号（含停用） */
+async function listAllAccounts() {
+  const rows = await db.query('SELECT * FROM accounts ORDER BY updated_at DESC');
+  return rows.map(rowToUser);
+}
+
+async function findById(id) {
+  const rows = await db.query('SELECT * FROM accounts WHERE id = ? LIMIT 1', [Number(id)]);
+  return rowToUser(rows[0]);
+}
+
+/**
+ * 更新管理字段：targetCount / status / successCount / nickname
+ */
+async function updateAccount(id, patch = {}) {
+  const fields = [];
+  const params = [];
+  if (patch.targetCount != null) {
+    fields.push('target_count = ?');
+    params.push(normalizeTargetCount(patch.targetCount));
+  }
+  if (patch.status != null) {
+    fields.push('status = ?');
+    params.push(Number(patch.status) ? 1 : 0);
+  }
+  if (patch.successCount != null) {
+    const n = Math.max(0, Math.floor(Number(patch.successCount) || 0));
+    fields.push('success_count = ?');
+    params.push(n);
+  }
+  if (patch.nickname !== undefined) {
+    fields.push('nickname = ?');
+    params.push(patch.nickname ? String(patch.nickname) : null);
+  }
+  if (!fields.length) return findById(id);
+  params.push(Number(id));
+  await db.query(`UPDATE accounts SET ${fields.join(', ')} WHERE id = ?`, params);
+  return findById(id);
+}
+
+async function deleteAccount(id) {
+  const existing = await findById(id);
+  if (!existing) return null;
+  await db.query('DELETE FROM accounts WHERE id = ?', [Number(id)]);
+  return existing;
+}
+
+async function deleteAccountByMobile(mobile) {
+  const existing = await findByMobile(mobile);
+  if (!existing) return null;
+  await db.query('DELETE FROM accounts WHERE mobile = ?', [String(mobile)]);
+  return existing;
+}
+
+/** API 列表用：不含 cookie 等敏感字段 */
+function toPublicAccount(user) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    mobile: user.mobile,
+    nickname: user.nickname,
+    vipLevel: user.vipLevel,
+    uid: user.uid,
+    status: user.status,
+    successCount: user.successCount || 0,
+    targetCount: user.targetCount || 1,
+    completed: (user.successCount || 0) >= (user.targetCount || 1),
+    loggedInAt: user.loggedInAt,
+    updatedAt: user.updatedAt,
+  };
+}
+
 async function createLoginSession({ token, expiresAt, targetCount }) {
   await db.query(
     `INSERT INTO login_sessions (token, status, target_count, expires_at) VALUES (?, 'pending', ?, ?)`,
@@ -127,7 +199,13 @@ async function updateLoginSession(token, patch) {
 module.exports = {
   upsertAccount,
   findByMobile,
+  findById,
   listActiveAccounts,
+  listAllAccounts,
+  updateAccount,
+  deleteAccount,
+  deleteAccountByMobile,
+  toPublicAccount,
   createLoginSession,
   findLoginSession,
   updateLoginSession,

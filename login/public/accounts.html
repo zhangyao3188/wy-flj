@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>账号管理 - 福利金</title>
+  <style>
+    :root {
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --text: #1f2a37;
+      --muted: #667085;
+      --line: #e4e7ec;
+      --accent: #e60012;
+      --accent-soft: #fff1f0;
+      --ok: #12b76a;
+      --warn: #f79009;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(900px 420px at 100% -10%, #ffe8e6 0%, transparent 55%),
+        radial-gradient(700px 360px at -10% 110%, #e8f1ff 0%, transparent 50%),
+        var(--bg);
+      color: var(--text);
+      padding: 20px 16px 40px;
+    }
+    .wrap { width: min(1100px, 100%); margin: 0 auto; }
+    .top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 0 0 6px; font-size: 1.55rem; }
+    .sub { color: var(--muted); margin: 0; font-size: 0.92rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 0.92rem;
+      font-weight: 600;
+      cursor: pointer;
+      min-height: 40px;
+    }
+    .btn-primary {
+      color: #fff;
+      background: linear-gradient(135deg, #ff3b30, #e60012);
+    }
+    .btn-ghost {
+      color: var(--text);
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+    .btn-danger {
+      color: #fff;
+      background: #d92d20;
+    }
+    .btn-warn {
+      color: #fff;
+      background: var(--warn);
+    }
+    .btn:disabled { opacity: 0.55; cursor: wait; }
+    .btn-sm { padding: 6px 10px; min-height: 32px; font-size: 0.82rem; }
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .chip {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .chip strong { color: var(--text); }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 12px 40px rgba(31, 42, 55, 0.06);
+      overflow: hidden;
+    }
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 860px;
+    }
+    th, td {
+      padding: 12px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.9rem;
+      vertical-align: middle;
+    }
+    th {
+      background: #f9fafb;
+      color: var(--muted);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .mono { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+    .muted { color: var(--muted); }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+    .tag-ok { background: #ecfdf3; color: #027a48; }
+    .tag-off { background: #f2f4f7; color: #667085; }
+    .tag-done { background: #fff6ed; color: #b54708; }
+    .row-ops { display: flex; flex-wrap: wrap; gap: 6px; }
+    .empty, .err, .loading {
+      padding: 28px 16px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .err { color: #d92d20; }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 28px;
+      transform: translateX(-50%);
+      background: #1f2a37;
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      z-index: 20;
+      max-width: min(90vw, 420px);
+    }
+    .toast.show { opacity: 1; }
+    dialog {
+      border: 0;
+      border-radius: 16px;
+      padding: 0;
+      width: min(420px, calc(100vw - 32px));
+      box-shadow: 0 20px 50px rgba(31, 42, 55, 0.2);
+    }
+    dialog::backdrop { background: rgba(16, 24, 40, 0.45); }
+    .dlg { padding: 22px 20px; }
+    .dlg h2 { margin: 0 0 8px; font-size: 1.15rem; }
+    .dlg p { margin: 0 0 16px; color: var(--muted); font-size: 0.92rem; line-height: 1.5; }
+    .dlg label { display: block; font-weight: 600; font-size: 0.88rem; margin-bottom: 8px; }
+    .dlg input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 1rem;
+      margin-bottom: 16px;
+    }
+    .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    @media (max-width: 640px) {
+      h1 { font-size: 1.3rem; }
+      th, td { padding: 10px 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <div class="brand">福利金账号</div>
+        <h1>账号管理</h1>
+        <p class="sub">查看全部账号，可修改抢购次数、重置成功次数或删除。</p>
+      </div>
+      <div class="actions">
+        <a class="btn btn-ghost" href="/">去登录</a>
+        <button class="btn btn-primary" id="btnRefresh" type="button">刷新</button>
+      </div>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="panel">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>手机号</th>
+              <th>昵称</th>
+              <th>等级</th>
+              <th>成功/目标</th>
+              <th>状态</th>
+              <th>登录时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="7" class="loading">加载中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="editDlg">
+    <form class="dlg" id="editForm" method="dialog">
+      <h2>编辑抢购次数</h2>
+      <p id="editHint">修改后立即生效。</p>
+      <label for="editTarget">抢购次数</label>
+      <input id="editTarget" type="number" min="1" max="9999" step="1" required />
+      <div class="dlg-actions">
+        <button class="btn btn-ghost" type="button" id="editCancel">取消</button>
+        <button class="btn btn-primary" type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const tbody = document.getElementById('tbody');
+    const statsEl = document.getElementById('stats');
+    const toastEl = document.getElementById('toast');
+    const editDlg = document.getElementById('editDlg');
+    const editForm = document.getElementById('editForm');
+    const editTarget = document.getElementById('editTarget');
+    const editHint = document.getElementById('editHint');
+    let editingId = null;
+    let toastTimer = null;
+
+    function toast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+    }
+
+    function fmtTime(v) {
+      if (!v) return '—';
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) return String(v);
+      const p = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+
+    function vipStatText(vipStats) {
+      const entries = Object.entries(vipStats || {}).sort((a, b) => {
+        const na = Number(String(a[0]).replace(/\D/g, ''));
+        const nb = Number(String(b[0]).replace(/\D/g, ''));
+        if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+        return String(a[0]).localeCompare(String(b[0]));
+      });
+      return entries.map(([lv, n]) => `${lv} <strong>${n}</strong>`).join(' · ') || '暂无';
+    }
+
+    function statusTag(a) {
+      if (a.completed) return '<span class="tag tag-done">已完成</span>';
+      return '<span class="tag tag-ok">可用</span>';
+    }
+
+    async function loadAccounts() {
+      tbody.innerHTML = '<tr><td colspan="7" class="loading">加载中…</td></tr>';
+      try {
+        const res = await fetch('/api/accounts?all=1');
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.message || '加载失败');
+        const list = data.accounts || [];
+        statsEl.innerHTML = [
+          `<span class="chip">共 <strong>${data.total || 0}</strong> 个账号</span>`,
+          `<span class="chip">${vipStatText(data.vipStats)}</span>`,
+        ].join('');
+        if (!list.length) {
+          tbody.innerHTML = '<tr><td colspan="7" class="empty">暂无账号，请先去登录入库</td></tr>';
+          return;
+        }
+        tbody.innerHTML = list.map((a) => `
+          <tr data-id="${a.id}">
+            <td class="mono">${a.mobile || '—'}</td>
+            <td>${escapeHtml(a.nickname || '—')}</td>
+            <td><strong>${escapeHtml(a.vipLevel || '—')}</strong></td>
+            <td class="mono">${a.successCount || 0} / ${a.targetCount || 1}</td>
+            <td>${statusTag(a)}</td>
+            <td class="muted">${fmtTime(a.loggedInAt || a.updatedAt)}</td>
+            <td>
+              <div class="row-ops">
+                <button class="btn btn-ghost btn-sm" data-act="edit" type="button">次数</button>
+                <button class="btn btn-warn btn-sm" data-act="reset" type="button">重置成功</button>
+                <button class="btn btn-danger btn-sm" data-act="del" type="button">删除</button>
+              </div>
+            </td>
+          </tr>
+        `).join('');
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="7" class="err">${escapeHtml(e.message || String(e))}</td></tr>`;
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    async function patchAccount(id, body) {
+      const res = await fetch(`/api/accounts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.message || '更新失败');
+      return data.account;
+    }
+
+    async function deleteAccount(id) {
+      const res = await fetch(`/api/accounts/${id}/delete`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        throw new Error(data.message || `删除失败 (${res.status})`);
+      }
+      return data;
+    }
+
+    tbody.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('button[data-act]');
+      if (!btn) return;
+      const tr = btn.closest('tr[data-id]');
+      if (!tr) return;
+      const id = tr.getAttribute('data-id');
+      const act = btn.getAttribute('data-act');
+      const mobile = tr.children[0]?.textContent || id;
+
+      try {
+        if (act === 'edit') {
+          const progress = tr.children[3]?.textContent || '';
+          editingId = id;
+          editHint.textContent = `账号 ${mobile}（当前 ${progress}）`;
+          const cur = Number(String(progress).split('/')[1]) || 1;
+          editTarget.value = String(cur);
+          editDlg.showModal();
+          return;
+        }
+        if (act === 'reset') {
+          if (!confirm(`确认将 ${mobile} 的成功次数重置为 0？`)) return;
+          btn.disabled = true;
+          await patchAccount(id, { resetSuccess: true });
+          toast('已重置成功次数');
+          await loadAccounts();
+          return;
+        }
+        if (act === 'del') {
+          if (!confirm(`确认删除账号 ${mobile}？此操作不可恢复。`)) return;
+          btn.disabled = true;
+          await deleteAccount(id);
+          toast(`已删除 ${mobile}`);
+          await loadAccounts();
+        }
+      } catch (e) {
+        toast(e.message || String(e));
+        btn.disabled = false;
+      }
+    });
+
+    editForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (!editingId) return;
+      const n = Number(editTarget.value);
+      if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+        toast('抢购次数须为大于等于 1 的整数');
+        return;
+      }
+      try {
+        await patchAccount(editingId, { targetCount: n });
+        editDlg.close();
+        toast('抢购次数已更新');
+        await loadAccounts();
+      } catch (e) {
+        toast(e.message || String(e));
+      }
+    });
+
+    document.getElementById('editCancel').addEventListener('click', () => editDlg.close());
+    document.getElementById('btnRefresh').addEventListener('click', () => loadAccounts());
+    loadAccounts();
+  </script>
+</body>
+</html>
