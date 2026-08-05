@@ -124,9 +124,10 @@ function isSelfOk(selfData) {
  * 远程登录会话：网页版桌面视口内嵌。
  */
 class RemoteLoginSession {
-  constructor(token, targetCount = 1) {
+  constructor(token, targetCount = 1, buyerNickname = null) {
     this.token = token;
     this.targetCount = accountRepo.normalizeTargetCount(targetCount);
+    this.buyerNickname = accountRepo.normalizeBuyerNickname(buyerNickname);
     this.browser = null;
     this.context = null;
     this.page = null;
@@ -573,17 +574,22 @@ class RemoteLoginSession {
     const saved = await accountRepo.upsertAccount({
       ...profile,
       targetCount: this.targetCount,
+      buyerNickname: this.buyerNickname,
     });
     this.mobile = saved.mobile;
     this.account = {
       mobile: saved.mobile,
       nickname: saved.nickname,
+      buyerNickname: saved.buyerNickname,
+      actAccount: saved.actAccount,
       vipLevel: saved.vipLevel,
       targetCount: saved.targetCount,
       successCount: saved.successCount,
     };
     this.status = 'success';
-    this.message = `登录成功，账号已写入数据库（抢购次数=${saved.targetCount}）`;
+    this.message = `登录成功，账号已写入数据库（抢购次数=${saved.targetCount}${
+      saved.buyerNickname ? `，买家=${saved.buyerNickname}` : ''
+    }${saved.actAccount ? `，账户=${saved.actAccount}` : ''}）`;
     await accountRepo.updateLoginSession(this.token, {
       status: 'success',
       mobile: saved.mobile,
@@ -689,6 +695,28 @@ class RemoteLoginSession {
     const selfResult =
       (selfData && (selfData.result || selfData.data)) || selfData || {};
     const { jarToJSON } = require('./http');
+
+    let actAccount = null;
+    try {
+      await session.client.get(`${C.PAY_API}/api/nlogin`, { params: {} }).catch(() => {});
+      try {
+        await session.client.get(`${C.INF}/v1/web/cooperate/plutus/cookie-exchange`);
+      } catch (_) {}
+      await ensureXsrf(session.client, session.jar);
+      const actRes = await session.client.post(`${C.INF_ACT}/v1/act-web/module/common/actInfo`, {
+        actId: C.ACT_ID,
+      });
+      const actRaw = actRes.data || {};
+      const actResult = actRaw.result || actRaw.data || {};
+      actAccount =
+        actResult.actAccount ||
+        actResult.account ||
+        (actResult.user && actResult.user.actAccount) ||
+        null;
+    } catch (e) {
+      console.warn(`[login] 兜底 actInfo 失败: ${e.message || e}`);
+    }
+
     return {
       mobile: String(mobile),
       nickname: String(
@@ -698,6 +726,7 @@ class RemoteLoginSession {
           selfResult.name ||
           mobile
       ),
+      actAccount: actAccount ? String(actAccount) : null,
       vipLevel: normalizeVipLevel(
         vipResult.currentLv || vipResult.level || vipResult.vipLevel || 'V1'
       ),
@@ -732,14 +761,20 @@ class SessionManager {
     this.sessions = new Map();
   }
 
-  async create({ targetCount } = {}) {
+  async create({ targetCount, buyerNickname } = {}) {
     const token = crypto.randomBytes(16).toString('hex');
     const ttl = Number(process.env.LOGIN_SESSION_TTL_MS || 600000);
     const expiresAt = new Date(Date.now() + ttl);
     const quota = accountRepo.normalizeTargetCount(targetCount);
-    await accountRepo.createLoginSession({ token, expiresAt, targetCount: quota });
+    const buyer = accountRepo.normalizeBuyerNickname(buyerNickname);
+    await accountRepo.createLoginSession({
+      token,
+      expiresAt,
+      targetCount: quota,
+      buyerNickname: buyer,
+    });
 
-    const remote = new RemoteLoginSession(token, quota);
+    const remote = new RemoteLoginSession(token, quota, buyer);
     this.sessions.set(token, remote);
     try {
       await remote.start();

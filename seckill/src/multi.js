@@ -15,7 +15,10 @@ const {
   calibrateClock,
   waitUntilServer,
   resolveTestFireAt,
-  resolveFireEarlyMs,
+  resolveFireOffsetRange,
+  sampleFireOffset,
+  formatFireOffsetLabel,
+  formatFireRangeLabel,
   FIRE_EARLY_MS,
   WARMUP_BEFORE_MS,
   COUNTDOWN_LAST_MS,
@@ -41,7 +44,7 @@ function formatVipLevelStats(accounts) {
 }
 
 /**
- * 仅从线上 MySQL accounts 加载账号（已完成设定抢购次数的账号会被过滤）
+ * 从线上 MySQL 加载抢购任务（账号×等级展开；已完成等级会过滤）
  */
 async function loadAccountsFromDb(mobilesFilter) {
   await accountRepo.ensureAccountColumns();
@@ -49,31 +52,55 @@ async function loadAccountsFromDb(mobilesFilter) {
   if (mobilesFilter && mobilesFilter.length) {
     users = [];
     for (const mobile of mobilesFilter) {
-      const u = await accountRepo.findByMobile(mobile);
-      if (!u || u.status === 0) {
+      const base = await accountRepo.findByMobile(mobile);
+      if (!base || base.status === 0) {
         console.warn(`[dev] 数据库无此可用账号: ${mobile}`);
         continue;
       }
-      if (u.completed || u.successCount >= u.targetCount) {
-        console.warn(
-          `[dev] 跳过已完成账号: ${mobile}（成功 ${u.successCount}/${u.targetCount}）`
-        );
-        continue;
+      const levels = await accountRepo.listLevelsByMobile(mobile);
+      const list =
+        levels.length > 0
+          ? levels
+          : [
+              {
+                id: null,
+                vipLevel: base.vipLevel,
+                successCount: base.successCount,
+                targetCount: base.targetCount,
+                completed: base.completed,
+              },
+            ];
+      for (const lv of list) {
+        if (lv.completed || lv.successCount >= lv.targetCount) {
+          console.warn(
+            `[dev] 跳过已完成: ${mobile}/${lv.vipLevel}（成功 ${lv.successCount}/${lv.targetCount}）`
+          );
+          continue;
+        }
+        users.push({
+          ...base,
+          vipLevel: lv.vipLevel,
+          forceVipLevel: lv.vipLevel,
+          levelId: lv.id,
+          successCount: lv.successCount,
+          targetCount: lv.targetCount,
+          completed: false,
+          maxVipLevel: base.vipLevel,
+        });
       }
-      users.push(u);
     }
   } else {
-    users = await accountRepo.listActiveAccounts();
+    users = await accountRepo.listSeckillJobs();
   }
   if (!users.length) {
-    throw new Error('线上数据库无可用账号（可能均已达设定抢购次数），请先通过 login 在线登录');
+    throw new Error('线上数据库无可用抢购任务（可能均已达设定次数），请先通过 login 配置账号/等级');
   }
   return users;
 }
 
 async function runMulti(options = {}) {
   const immediate = !!options.immediate;
-  const fireEarlyMs = resolveFireEarlyMs(options);
+  const fireRange = resolveFireOffsetRange(options);
   const warmupBeforeMs =
     options.warmupBeforeMs != null ? options.warmupBeforeMs : WARMUP_BEFORE_MS;
 
@@ -87,15 +114,17 @@ async function runMulti(options = {}) {
   const modeLabel = immediate
     ? options.testStartAt || options.testStartAtMs
       ? ' [测试指定时间]'
-      : ' [测试倒计时抢]'
+      : ' [测试下一整分]'
     : '';
-  console.log(`[dev] 账号数=${mobiles.length}${modeLabel}`);
+  console.log(`[dev] 账号数=${mobiles.length}${modeLabel}（按账号×等级展开）`);
   console.log(
-    `[dev] 账号: ${users.map((u) => `${u.mobile}(${u.successCount}/${u.targetCount})`).join(', ')}`
+    `[dev] 任务: ${users.map((u) => `${u.mobile}/${u.vipLevel}(${u.successCount}/${u.targetCount})`).join(', ')}`
   );
   const intervalMs = resolveAcquireIntervalMs(options);
   console.log(
-    `[dev] 启动预热 + 开抢前 ${warmupBeforeMs / 1000}s 再预热；成功即停；轮询间隔=${intervalMs}ms；提前开火 FIRE_EARLY_MS=${fireEarlyMs}ms；末${COUNTDOWN_LAST_MS / 1000}s毫秒倒计时`
+    `[dev] 启动预热 + 开抢前 ${warmupBeforeMs / 1000}s 再预热；成功即停；轮询间隔=${intervalMs}ms；开火偏移区间 FIRE_EARLY_MS=${formatFireRangeLabel(
+      fireRange
+    )}（负=提前，正=延后，账号内随机）；末${COUNTDOWN_LAST_MS / 1000}s毫秒倒计时`
   );
   console.log('');
 
@@ -104,7 +133,11 @@ async function runMulti(options = {}) {
   const prepareResults = await Promise.all(
     users.map(async (user) => {
       try {
-        const account = await prepareAccount(user.mobile, { ...options, user });
+        const account = await prepareAccount(user.mobile, {
+          ...options,
+          user,
+          vipLevel: user.forceVipLevel || user.vipLevel,
+        });
         return { ok: true, account };
       } catch (e) {
         return { ok: false, mobile: user.mobile, error: e.message || String(e) };
@@ -124,6 +157,11 @@ async function runMulti(options = {}) {
     throw new Error('全部账号预热失败，无法开抢');
   }
 
+  // 每个账号在区间内随机一个开火偏移
+  for (const a of prepared) {
+    a.fireOffsetMs = sampleFireOffset(fireRange);
+  }
+
   console.log('');
   console.log(`[dev] 启动预热成功 ${prepared.length}/${mobiles.length}`);
   for (const a of prepared) {
@@ -131,7 +169,7 @@ async function runMulti(options = {}) {
       hour12: false,
     });
     console.log(
-      `[dev] ✓ ${a.mobile} ${a.nickname || ''} ${a.vipLevel} couponId=${a.ready.couponId} stockId=${a.ready.stockId}${a.ready._inferredStock ? '(推导)' : ''} start=${startAt}${a.alreadyAcquired ? ' [已领取]' : ''}`
+      `[dev] ✓ ${a.mobile}/${a.vipLevel} ${a.nickname || ''} couponId=${a.ready.couponId} stockId=${a.ready.stockId}${a.ready._inferredStock ? '(推导)' : ''} start=${startAt} 偏移=${formatFireOffsetLabel(a.fireOffsetMs)}${a.alreadyAcquired ? ' [已领取]' : ''}`
     );
     if (a.logFile) console.log(`[dev]   日志: ${a.logFile}`);
   }
@@ -141,10 +179,13 @@ async function runMulti(options = {}) {
   // 任意一个账号校准服务器时间（拿到档位开始时间之后）
   await calibrateClock(prepared[0].client, '[dev] ');
 
+  const span = Math.max(Math.abs(fireRange.min), Math.abs(fireRange.max));
+
   if (!immediate) {
     const earliestStart = Math.min(...prepared.map((a) => a.ready.seckillStartTime));
     const warmAt = earliestStart - warmupBeforeMs;
-    const wakeAt = earliestStart - fireEarlyMs;
+    // 最早可能开火时刻 = 开抢 + 区间最小值（负数更靠前）
+    const wakeAt = earliestStart + fireRange.min;
 
     if (nowMs() < warmAt) {
       console.log(
@@ -171,14 +212,12 @@ async function runMulti(options = {}) {
       );
       const warmOk = warmResults.filter((r) => r.ok).length;
       console.log(`[dev] 开抢前预热完成 ${warmOk}/${prepared.length}`);
-      // 预热后再校准，减小时钟漂移
       const alive = prepared.find((a) => !a._warmupFailed);
       if (alive) await calibrateClock(alive.client, '[dev] ');
     }
 
-    // 在开火前预留窗口刷 XSRF，再到点立刻 acquire（避免吃掉 FIRE_EARLY_MS）
     const preFire = prepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
-    const xsrfAt = wakeAt - Math.max(1500, fireEarlyMs + 500);
+    const xsrfAt = wakeAt - Math.max(1500, span + 500);
     if (preFire.length && nowMs() < xsrfAt) {
       await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
     }
@@ -196,21 +235,18 @@ async function runMulti(options = {}) {
 
     if (nowMs() < wakeAt) {
       console.log(
-        `[dev] 已预刷 XSRF，最早开火约 ${formatLeft(wakeAt - nowMs())} 后（提前 ${fireEarlyMs}ms）；末 ${
-          COUNTDOWN_LAST_MS / 1000
-        }s 毫秒倒计时`
+        `[dev] 已预刷 XSRF，最早开火约 ${formatLeft(wakeAt - nowMs())} 后（区间 ${formatFireRangeLabel(
+          fireRange
+        )}）；末 ${COUNTDOWN_LAST_MS / 1000}s 毫秒倒计时`
       );
       await waitUntilServer(wakeAt, { label: '开抢倒计时' });
     }
   } else {
     const scheduledAt = resolveTestFireAt(options, nowMs());
-    const fireAt = scheduledAt - fireEarlyMs;
+    const earliestFire = scheduledAt + fireRange.min;
     const schedText = new Date(scheduledAt).toLocaleString('zh-CN', { hour12: false });
-    const fireText = `${new Date(fireAt).toLocaleString('zh-CN', {
-      hour12: false,
-    })}.${String(fireAt % 1000).padStart(3, '0')}`;
     const preFire = prepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
-    const xsrfAt = fireAt - Math.max(1500, fireEarlyMs + 500);
+    const xsrfAt = earliestFire - Math.max(1500, span + 500);
     if (preFire.length && nowMs() < xsrfAt) {
       await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
     }
@@ -223,19 +259,15 @@ async function runMulti(options = {}) {
         }
       })
     );
-    const left = fireAt - nowMs();
-    if (left <= 0) {
-      console.log(
-        `[dev] 测试模式：目标 ${schedText}（提前 ${fireEarlyMs}ms → ${fireText}）已过，立即并行开火`
-      );
-    } else {
-      console.log(
-        `[dev] 测试模式：目标 ${schedText}，提前 ${fireEarlyMs}ms 于 ${fireText} 并行开火（约 ${formatLeft(
-          left
-        )}，服务器时间）`
-      );
-      await waitUntilServer(fireAt, { label: '测试倒计时' });
+    // 记下测试目标时刻，各账号按自己的偏移等待
+    for (const a of prepared) {
+      a._testScheduledAt = scheduledAt;
     }
+    console.log(
+      `[dev] 测试模式：目标 ${schedText}，各账号在区间 ${formatFireRangeLabel(
+        fireRange
+      )} 内随机偏移开火`
+    );
   }
 
   const toFire = prepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
@@ -251,31 +283,47 @@ async function runMulti(options = {}) {
   const results = await Promise.all(
     toFire.map(async (account) => {
       try {
-        if (!immediate) {
-          const fireAt = account.ready.seckillStartTime - fireEarlyMs;
-          if (nowMs() < fireAt) {
-            await waitUntil(fireAt, {
-              label: account.mobile,
-              countdownLastMs: COUNTDOWN_LAST_MS,
-              quiet: toFire.length > 1,
-            });
-          }
+        const baseAt = immediate
+          ? account._testScheduledAt
+          : account.ready.seckillStartTime;
+        const fireOffsetMs = account.fireOffsetMs || 0;
+        const fireAt = baseAt + fireOffsetMs;
+        if (nowMs() < fireAt) {
+          await waitUntil(fireAt, {
+            label: account.mobile,
+            countdownLastMs: COUNTDOWN_LAST_MS,
+            quiet: toFire.length > 1,
+          });
         }
-        console.log(`[${account.mobile}] 开火 couponId=${account.ready.couponId}`);
+        console.log(
+          `[${account.mobile}/${account.vipLevel}] 开火 ${formatFireOffsetLabel(fireOffsetMs)} couponId=${account.ready.couponId}`
+        );
         const result = await fireLoop(account.client, account.ready, account.target, {
           ...options,
-          tag: account.mobile,
+          tag: `${account.mobile}/${account.vipLevel}`,
           jar: account.jar,
           user: account.user,
+          vipLevel: account.vipLevel,
+          fireOffsetMs,
+          fireOffsetLabel: formatFireOffsetLabel(fireOffsetMs),
+          fireBaseAt: baseAt,
+          fireAt,
         });
-        return { mobile: account.mobile, vipLevel: account.vipLevel, ok: true, ...result };
+        return {
+          mobile: account.mobile,
+          vipLevel: account.vipLevel,
+          ok: true,
+          fireOffsetMs,
+          ...result,
+        };
       } catch (e) {
-        console.error(`[${account.mobile}] 抢购异常: ${e.message || e}`);
+        console.error(`[${account.mobile}/${account.vipLevel}] 抢购异常: ${e.message || e}`);
         return {
           mobile: account.mobile,
           vipLevel: account.vipLevel,
           ok: false,
           success: false,
+          fireOffsetMs: account.fireOffsetMs,
           error: e.message || String(e),
         };
       }
@@ -297,7 +345,9 @@ async function runMulti(options = {}) {
   console.log('[dev] ========== 汇总 ==========');
   for (const r of results) {
     console.log(
-      `[dev] ${r.mobile} success=${!!r.success} attempts=${r.attempts || 0}${r.stopReason ? ` stop=${r.stopReason}` : ''}${r.successCount != null ? ` successCount=${r.successCount}` : ''}${r.error ? ` error=${r.error}` : ''}`
+      `[dev] ${r.mobile}/${r.vipLevel || '?'} success=${!!r.success} attempts=${r.attempts || 0}${
+        r.fireOffsetMs != null ? ` offset=${formatFireOffsetLabel(r.fireOffsetMs)}` : ''
+      }${r.stopReason ? ` stop=${r.stopReason}` : ''}${r.successCount != null ? ` successCount=${r.successCount}` : ''}${r.error ? ` error=${r.error}` : ''}`
     );
   }
   for (const f of failed) {

@@ -28,7 +28,7 @@
       color: var(--text);
       padding: 20px 16px 40px;
     }
-    .wrap { width: min(1100px, 100%); margin: 0 auto; }
+    .wrap { width: min(1680px, calc(100% - 32px)); margin: 0 auto; }
     .top {
       display: flex;
       flex-wrap: wrap;
@@ -70,21 +70,44 @@
       background: #fff;
       border: 1px solid var(--line);
     }
-    .btn-danger {
-      color: #fff;
-      background: #d92d20;
-    }
-    .btn-warn {
-      color: #fff;
-      background: var(--warn);
-    }
+    .btn-danger { color: #fff; background: #d92d20; }
+    .btn-warn { color: #fff; background: var(--warn); }
     .btn:disabled { opacity: 0.55; cursor: wait; }
     .btn-sm { padding: 6px 10px; min-height: 32px; font-size: 0.82rem; }
-    .stats {
+    .stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .filters {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 10px;
+      align-items: center;
       margin-bottom: 14px;
+      padding: 12px 14px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .filters label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-right: 4px;
+    }
+    .filters input,
+    .filters select {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 0.92rem;
+      min-height: 38px;
+      background: #fff;
+      color: var(--text);
+      outline: none;
+    }
+    .filters input { width: min(200px, 42vw); }
+    .filters input:focus,
+    .filters select:focus {
+      border-color: #f5a09a;
+      box-shadow: 0 0 0 3px rgba(230, 0, 18, 0.1);
     }
     .chip {
       background: #fff;
@@ -103,17 +126,13 @@
       overflow: hidden;
     }
     .table-wrap { overflow-x: auto; }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 860px;
-    }
+    table { width: 100%; border-collapse: collapse; min-width: 1100px; }
     th, td {
       padding: 12px 14px;
       text-align: left;
       border-bottom: 1px solid var(--line);
       font-size: 0.9rem;
-      vertical-align: middle;
+      vertical-align: top;
     }
     th {
       background: #f9fafb;
@@ -122,7 +141,7 @@
       white-space: nowrap;
     }
     tr:last-child td { border-bottom: 0; }
-    .mono { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+    .mono { font-variant-numeric: tabular-nums; }
     .muted { color: var(--muted); }
     .tag {
       display: inline-flex;
@@ -133,14 +152,21 @@
       font-weight: 600;
     }
     .tag-ok { background: #ecfdf3; color: #027a48; }
-    .tag-off { background: #f2f4f7; color: #667085; }
     .tag-done { background: #fff6ed; color: #b54708; }
-    .row-ops { display: flex; flex-wrap: wrap; gap: 6px; }
-    .empty, .err, .loading {
-      padding: 28px 16px;
-      text-align: center;
-      color: var(--muted);
+    .levels { display: flex; flex-direction: column; gap: 8px; min-width: 220px; }
+    .level-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      background: #f9fafb;
+      border: 1px solid var(--line);
+      border-radius: 10px;
     }
+    .level-row strong { min-width: 28px; }
+    .row-ops { display: flex; flex-wrap: wrap; gap: 6px; }
+    .empty, .err, .loading { padding: 28px 16px; text-align: center; color: var(--muted); }
     .err { color: #d92d20; }
     .toast {
       position: fixed;
@@ -171,19 +197,16 @@
     .dlg h2 { margin: 0 0 8px; font-size: 1.15rem; }
     .dlg p { margin: 0 0 16px; color: var(--muted); font-size: 0.92rem; line-height: 1.5; }
     .dlg label { display: block; font-weight: 600; font-size: 0.88rem; margin-bottom: 8px; }
-    .dlg input {
+    .dlg input, .dlg select {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 12px;
       font-size: 1rem;
       margin-bottom: 16px;
+      background: #fff;
     }
     .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; }
-    @media (max-width: 640px) {
-      h1 { font-size: 1.3rem; }
-      th, td { padding: 10px 10px; }
-    }
   </style>
 </head>
 <body>
@@ -192,7 +215,7 @@
       <div>
         <div class="brand">福利金账号</div>
         <h1>账号管理</h1>
-        <p class="sub">查看全部账号，可修改抢购次数、重置成功次数或删除。</p>
+        <p class="sub">支持同账号配置多个抢购等级（如最大 V6，同时抢 V6/V5/V4）。</p>
       </div>
       <div class="actions">
         <a class="btn btn-ghost" href="/">去登录</a>
@@ -200,22 +223,38 @@
       </div>
     </div>
     <div class="stats" id="stats"></div>
+    <div class="filters">
+      <div>
+        <label for="filterMobile">手机号</label>
+        <input id="filterMobile" type="text" inputmode="numeric" placeholder="模糊搜索" maxlength="20" />
+      </div>
+      <div>
+        <label for="filterStatus">状态</label>
+        <select id="filterStatus">
+          <option value="all">全部</option>
+          <option value="active">可用</option>
+          <option value="completed">全部完成</option>
+        </select>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="btnClearFilter" type="button">清空筛选</button>
+    </div>
     <div class="panel">
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
               <th>手机号</th>
-              <th>昵称</th>
-              <th>等级</th>
-              <th>成功/目标</th>
+              <th>买家昵称</th>
+              <th>账户名称</th>
+              <th>最大档</th>
+              <th>抢购等级</th>
               <th>状态</th>
               <th>登录时间</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="tbody">
-            <tr><td colspan="7" class="loading">加载中…</td></tr>
+            <tr><td colspan="8" class="loading">加载中…</td></tr>
           </tbody>
         </table>
       </div>
@@ -223,13 +262,41 @@
   </div>
 
   <dialog id="editDlg">
-    <form class="dlg" id="editForm" method="dialog">
+    <form class="dlg" id="editForm">
       <h2>编辑抢购次数</h2>
       <p id="editHint">修改后立即生效。</p>
       <label for="editTarget">抢购次数</label>
       <input id="editTarget" type="number" min="1" max="9999" step="1" required />
       <div class="dlg-actions">
         <button class="btn btn-ghost" type="button" id="editCancel">取消</button>
+        <button class="btn btn-primary" type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="addLevelDlg">
+    <form class="dlg" id="addLevelForm">
+      <h2>新增抢购等级</h2>
+      <p id="addLevelHint">不可超过账号最大档位。</p>
+      <label for="addLevelVip">等级</label>
+      <select id="addLevelVip" required></select>
+      <label for="addLevelTarget">抢购次数</label>
+      <input id="addLevelTarget" type="number" min="1" max="9999" step="1" value="1" required />
+      <div class="dlg-actions">
+        <button class="btn btn-ghost" type="button" id="addLevelCancel">取消</button>
+        <button class="btn btn-primary" type="submit">添加</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="buyerDlg">
+    <form class="dlg" id="buyerForm">
+      <h2>编辑买家昵称</h2>
+      <p id="buyerHint">用于管理识别，可留空。</p>
+      <label for="buyerInput">买家昵称</label>
+      <input id="buyerInput" type="text" maxlength="128" placeholder="例如：张三店铺" />
+      <div class="dlg-actions">
+        <button class="btn btn-ghost" type="button" id="buyerCancel">取消</button>
         <button class="btn btn-primary" type="submit">保存</button>
       </div>
     </form>
@@ -245,7 +312,14 @@
     const editForm = document.getElementById('editForm');
     const editTarget = document.getElementById('editTarget');
     const editHint = document.getElementById('editHint');
-    let editingId = null;
+    const addLevelDlg = document.getElementById('addLevelDlg');
+    const addLevelForm = document.getElementById('addLevelForm');
+    const addLevelVip = document.getElementById('addLevelVip');
+    const addLevelTarget = document.getElementById('addLevelTarget');
+    const addLevelHint = document.getElementById('addLevelHint');
+    let editing = null; // { accountId, levelId }
+    let editingBuyerId = null;
+    let accountsCache = [];
     let toastTimer = null;
 
     function toast(msg) {
@@ -263,6 +337,14 @@
       return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
     }
 
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
     function vipStatText(vipStats) {
       const entries = Object.entries(vipStats || {}).sort((a, b) => {
         const na = Number(String(a[0]).replace(/\D/g, ''));
@@ -274,72 +356,115 @@
     }
 
     function statusTag(a) {
-      if (a.completed) return '<span class="tag tag-done">已完成</span>';
+      if (a.completed) return '<span class="tag tag-done">全部完成</span>';
       return '<span class="tag tag-ok">可用</span>';
     }
 
-    async function loadAccounts() {
-      tbody.innerHTML = '<tr><td colspan="7" class="loading">加载中…</td></tr>';
-      try {
-        const res = await fetch('/api/accounts?all=1');
-        const data = await res.json();
-        if (!data.ok) throw new Error(data.message || '加载失败');
-        const list = data.accounts || [];
-        statsEl.innerHTML = [
-          `<span class="chip">共 <strong>${data.total || 0}</strong> 个账号</span>`,
-          `<span class="chip">${vipStatText(data.vipStats)}</span>`,
-        ].join('');
-        if (!list.length) {
-          tbody.innerHTML = '<tr><td colspan="7" class="empty">暂无账号，请先去登录入库</td></tr>';
-          return;
+    function levelRank(lv) {
+      const m = String(lv || '').match(/(\d+)/);
+      return m ? Number(m[1]) : 0;
+    }
+
+    function renderLevels(a) {
+      const levels = a.levels && a.levels.length
+        ? a.levels
+        : [{ id: null, vipLevel: a.vipLevel, successCount: a.successCount || 0, targetCount: a.targetCount || 1, completed: a.completed }];
+      return `<div class="levels">${levels.map((l) => `
+        <div class="level-row" data-level-id="${l.id || ''}">
+          <strong>${escapeHtml(l.vipLevel)}</strong>
+          <span class="mono">${l.successCount || 0}/${l.targetCount || 1}</span>
+          ${l.completed ? '<span class="tag tag-done">完成</span>' : '<span class="tag tag-ok">抢购中</span>'}
+          <button class="btn btn-ghost btn-sm" data-act="edit-level" data-level-id="${l.id || ''}" type="button">次数</button>
+          <button class="btn btn-warn btn-sm" data-act="reset-level" data-level-id="${l.id || ''}" type="button">重置</button>
+          <button class="btn btn-danger btn-sm" data-act="del-level" data-level-id="${l.id || ''}" type="button">删等级</button>
+        </div>
+      `).join('')}</div>`;
+    }
+
+    function getFilteredAccounts() {
+      const mobileQ = String(document.getElementById('filterMobile').value || '')
+        .trim()
+        .replace(/\s+/g, '');
+      const status = document.getElementById('filterStatus').value || 'all';
+      return accountsCache.filter((a) => {
+        if (mobileQ) {
+          const m = String(a.mobile || '');
+          if (!m.includes(mobileQ)) return false;
         }
-        tbody.innerHTML = list.map((a) => `
-          <tr data-id="${a.id}">
+        if (status === 'active' && a.completed) return false;
+        if (status === 'completed' && !a.completed) return false;
+        return true;
+      });
+    }
+
+    function renderAccountRows(list) {
+      if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty">没有符合条件的账号</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map((a) => `
+          <tr data-id="${a.id}" data-mobile="${escapeHtml(a.mobile || '')}" data-max="${escapeHtml(a.vipLevel || 'V1')}">
             <td class="mono">${a.mobile || '—'}</td>
-            <td>${escapeHtml(a.nickname || '—')}</td>
+            <td>
+              ${escapeHtml(a.buyerNickname || '—')}
+              ${a.nickname ? `<div class="muted" style="font-size:0.78rem;margin-top:4px">网易: ${escapeHtml(a.nickname)}</div>` : ''}
+            </td>
+            <td class="mono">${escapeHtml(a.actAccount || '—')}</td>
             <td><strong>${escapeHtml(a.vipLevel || '—')}</strong></td>
-            <td class="mono">${a.successCount || 0} / ${a.targetCount || 1}</td>
+            <td>${renderLevels(a)}</td>
             <td>${statusTag(a)}</td>
             <td class="muted">${fmtTime(a.loggedInAt || a.updatedAt)}</td>
             <td>
               <div class="row-ops">
-                <button class="btn btn-ghost btn-sm" data-act="edit" type="button">次数</button>
-                <button class="btn btn-warn btn-sm" data-act="reset" type="button">重置成功</button>
-                <button class="btn btn-danger btn-sm" data-act="del" type="button">删除</button>
+                <button class="btn btn-ghost btn-sm" data-act="edit-buyer" type="button">买家昵称</button>
+                <button class="btn btn-primary btn-sm" data-act="add-level" type="button">加等级</button>
+                <button class="btn btn-danger btn-sm" data-act="del" type="button">删账号</button>
               </div>
             </td>
           </tr>
         `).join('');
+    }
+
+    function applyFilters() {
+      const filtered = getFilteredAccounts();
+      const total = accountsCache.length;
+      statsEl.innerHTML = [
+        `<span class="chip">共 <strong>${total}</strong> 个账号</span>`,
+        filtered.length !== total
+          ? `<span class="chip">当前显示 <strong>${filtered.length}</strong></span>`
+          : '',
+        `<span class="chip" id="vipStatsChip"></span>`,
+      ].filter(Boolean).join('');
+      const chip = document.getElementById('vipStatsChip');
+      if (chip && lastVipStats) chip.innerHTML = `抢购档位 ${vipStatText(lastVipStats)}`;
+      renderAccountRows(filtered);
+    }
+
+    let lastVipStats = {};
+
+    async function loadAccounts() {
+      tbody.innerHTML = '<tr><td colspan="8" class="loading">加载中…</td></tr>';
+      try {
+        const res = await fetch('/api/accounts?all=1');
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.message || '加载失败');
+        accountsCache = data.accounts || [];
+        lastVipStats = data.vipStats || {};
+        if (!accountsCache.length) {
+          statsEl.innerHTML = `<span class="chip">共 <strong>0</strong> 个账号</span>`;
+          tbody.innerHTML = '<tr><td colspan="8" class="empty">暂无账号，请先去登录入库</td></tr>';
+          return;
+        }
+        applyFilters();
       } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="7" class="err">${escapeHtml(e.message || String(e))}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="err">${escapeHtml(e.message || String(e))}</td></tr>`;
       }
     }
 
-    function escapeHtml(s) {
-      return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    }
-
-    async function patchAccount(id, body) {
-      const res = await fetch(`/api/accounts/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.message || '更新失败');
-      return data.account;
-    }
-
-    async function deleteAccount(id) {
-      const res = await fetch(`/api/accounts/${id}/delete`, { method: 'POST' });
+    async function apiJson(url, options) {
+      const res = await fetch(url, options);
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.ok) {
-        throw new Error(data.message || `删除失败 (${res.status})`);
-      }
+      if (!res.ok || !data.ok) throw new Error(data.message || `请求失败 (${res.status})`);
       return data;
     }
 
@@ -348,32 +473,82 @@
       if (!btn) return;
       const tr = btn.closest('tr[data-id]');
       if (!tr) return;
-      const id = tr.getAttribute('data-id');
+      const accountId = tr.getAttribute('data-id');
+      const mobile = tr.getAttribute('data-mobile') || accountId;
+      const maxVip = tr.getAttribute('data-max') || 'V1';
       const act = btn.getAttribute('data-act');
-      const mobile = tr.children[0]?.textContent || id;
+      const levelId = btn.getAttribute('data-level-id');
 
       try {
-        if (act === 'edit') {
-          const progress = tr.children[3]?.textContent || '';
-          editingId = id;
-          editHint.textContent = `账号 ${mobile}（当前 ${progress}）`;
-          const cur = Number(String(progress).split('/')[1]) || 1;
-          editTarget.value = String(cur);
+        if (act === 'edit-buyer') {
+          const acc = accountsCache.find((a) => String(a.id) === String(accountId));
+          editingBuyerId = accountId;
+          document.getElementById('buyerHint').textContent = `账号 ${mobile}`;
+          document.getElementById('buyerInput').value = acc?.buyerNickname || '';
+          document.getElementById('buyerDlg').showModal();
+          return;
+        }
+        if (act === 'add-level') {
+          addingAccountId = accountId;
+          const max = levelRank(maxVip);
+          const used = new Set(
+            (accountsCache.find((a) => String(a.id) === String(accountId))?.levels || [])
+              .map((l) => String(l.vipLevel).toUpperCase())
+          );
+          const options = [];
+          for (let i = 1; i <= Math.max(max, 1); i++) {
+            const lv = `V${i}`;
+            if (!used.has(lv)) options.push(lv);
+          }
+          addLevelVip.innerHTML = options.map((lv) => `<option value="${lv}">${lv}</option>`).join('');
+          if (!options.length) {
+            toast(`已无可添加等级（最大 ${maxVip}）`);
+            return;
+          }
+          addLevelTarget.value = '1';
+          addLevelHint.textContent = `账号 ${mobile}，最大档 ${maxVip}`;
+          addLevelDlg.showModal();
+          return;
+        }
+        if (act === 'edit-level') {
+          if (!levelId) {
+            toast('该等级尚未入库，请先重新登录同步');
+            return;
+          }
+          const acc = accountsCache.find((a) => String(a.id) === String(accountId));
+          const lv = (acc?.levels || []).find((l) => String(l.id) === String(levelId));
+          editing = { accountId, levelId };
+          editHint.textContent = `账号 ${mobile} / ${lv?.vipLevel || ''}（当前 ${lv?.successCount || 0}/${lv?.targetCount || 1}）`;
+          editTarget.value = String(lv?.targetCount || 1);
           editDlg.showModal();
           return;
         }
-        if (act === 'reset') {
-          if (!confirm(`确认将 ${mobile} 的成功次数重置为 0？`)) return;
+        if (act === 'reset-level') {
+          if (!levelId) return toast('该等级尚未入库');
+          if (!confirm(`确认重置 ${mobile} 该等级成功次数为 0？`)) return;
           btn.disabled = true;
-          await patchAccount(id, { resetSuccess: true });
-          toast('已重置成功次数');
+          await apiJson(`/api/accounts/${accountId}/levels/${levelId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resetSuccess: true }),
+          });
+          toast('已重置');
+          await loadAccounts();
+          return;
+        }
+        if (act === 'del-level') {
+          if (!levelId) return toast('该等级尚未入库');
+          if (!confirm(`确认删除该抢购等级？`)) return;
+          btn.disabled = true;
+          await apiJson(`/api/accounts/${accountId}/levels/${levelId}/delete`, { method: 'POST' });
+          toast('已删除等级');
           await loadAccounts();
           return;
         }
         if (act === 'del') {
           if (!confirm(`确认删除账号 ${mobile}？此操作不可恢复。`)) return;
           btn.disabled = true;
-          await deleteAccount(id);
+          await apiJson(`/api/accounts/${accountId}/delete`, { method: 'POST' });
           toast(`已删除 ${mobile}`);
           await loadAccounts();
         }
@@ -385,14 +560,18 @@
 
     editForm.addEventListener('submit', async (ev) => {
       ev.preventDefault();
-      if (!editingId) return;
+      if (!editing) return;
       const n = Number(editTarget.value);
       if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
         toast('抢购次数须为大于等于 1 的整数');
         return;
       }
       try {
-        await patchAccount(editingId, { targetCount: n });
+        await apiJson(`/api/accounts/${editing.accountId}/levels/${editing.levelId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetCount: n }),
+        });
         editDlg.close();
         toast('抢购次数已更新');
         await loadAccounts();
@@ -401,7 +580,55 @@
       }
     });
 
+    addLevelForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (!addingAccountId) return;
+      try {
+        await apiJson(`/api/accounts/${addingAccountId}/levels`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            vipLevel: addLevelVip.value,
+            targetCount: Number(addLevelTarget.value) || 1,
+          }),
+        });
+        addLevelDlg.close();
+        toast('已添加抢购等级');
+        await loadAccounts();
+      } catch (e) {
+        toast(e.message || String(e));
+      }
+    });
+
+    document.getElementById('buyerForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (!editingBuyerId) return;
+      try {
+        await apiJson(`/api/accounts/${editingBuyerId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            buyerNickname: document.getElementById('buyerInput').value || '',
+          }),
+        });
+        document.getElementById('buyerDlg').close();
+        toast('买家昵称已更新');
+        await loadAccounts();
+      } catch (e) {
+        toast(e.message || String(e));
+      }
+    });
+
     document.getElementById('editCancel').addEventListener('click', () => editDlg.close());
+    document.getElementById('addLevelCancel').addEventListener('click', () => addLevelDlg.close());
+    document.getElementById('buyerCancel').addEventListener('click', () => document.getElementById('buyerDlg').close());
+    document.getElementById('filterMobile').addEventListener('input', () => applyFilters());
+    document.getElementById('filterStatus').addEventListener('change', () => applyFilters());
+    document.getElementById('btnClearFilter').addEventListener('click', () => {
+      document.getElementById('filterMobile').value = '';
+      document.getElementById('filterStatus').value = 'all';
+      applyFilters();
+    });
     document.getElementById('btnRefresh').addEventListener('click', () => loadAccounts());
     loadAccounts();
   </script>

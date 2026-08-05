@@ -40,13 +40,17 @@ app.post('/api/login/session', async (req, res) => {
     if (Number(raw) < 1 || !Number.isFinite(Number(raw))) {
       return res.status(400).json({ ok: false, message: '抢购次数须为大于等于 1 的整数' });
     }
-    const remote = await manager.create({ targetCount });
+    const buyerNickname = accountRepo.normalizeBuyerNickname(
+      req.body && req.body.buyerNickname
+    );
+    const remote = await manager.create({ targetCount, buyerNickname });
     const url = `${PUBLIC_URL}/session.html?token=${remote.token}`;
     res.json({
       ok: true,
       token: remote.token,
       url,
       targetCount,
+      buyerNickname,
       message: '请打开链接，在画面中完成网易登录',
     });
   } catch (e) {
@@ -126,8 +130,11 @@ app.get('/api/accounts', async (req, res) => {
     const accounts = list.map(accountRepo.toPublicAccount);
     const vipStats = {};
     for (const a of accounts) {
-      const lv = a.vipLevel || '未知';
-      vipStats[lv] = (vipStats[lv] || 0) + 1;
+      const levels = a.levels && a.levels.length ? a.levels : [{ vipLevel: a.vipLevel }];
+      for (const lv of levels) {
+        const key = lv.vipLevel || a.vipLevel || '未知';
+        vipStats[key] = (vipStats[key] || 0) + 1;
+      }
     }
     res.json({
       ok: true,
@@ -150,7 +157,77 @@ app.get('/api/accounts/:id', async (req, res) => {
   }
 });
 
-/** 更新抢购次数 / 重置成功次数 */
+/** 为账号新增抢购等级 */
+app.post('/api/accounts/:id/levels', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const body = req.body || {};
+    const level = await accountRepo.addSeckillLevel(id, {
+      vipLevel: body.vipLevel,
+      targetCount: body.targetCount,
+    });
+    const account = await accountRepo.findById(id);
+    res.json({
+      ok: true,
+      level,
+      account: accountRepo.toPublicAccount(account),
+      message: `已添加抢购等级 ${level.vipLevel}`,
+    });
+  } catch (e) {
+    res.status(400).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+/** 更新某抢购等级次数 / 重置成功 */
+app.patch('/api/accounts/:id/levels/:levelId', async (req, res) => {
+  try {
+    const accountId = Number(req.params.id);
+    const levelId = Number(req.params.levelId);
+    const account = await accountRepo.findById(accountId);
+    if (!account) return res.status(404).json({ ok: false, message: '账号不存在' });
+    const body = req.body || {};
+    const patch = {};
+    if (body.targetCount !== undefined) {
+      if (Number(body.targetCount) < 1 || !Number.isFinite(Number(body.targetCount))) {
+        return res.status(400).json({ ok: false, message: '抢购次数须为大于等于 1 的整数' });
+      }
+      patch.targetCount = body.targetCount;
+    }
+    if (body.successCount !== undefined) patch.successCount = body.successCount;
+    if (body.resetSuccess) patch.resetSuccess = true;
+    const level = await accountRepo.updateSeckillLevel(levelId, patch);
+    if (!level || String(level.mobile) !== String(account.mobile)) {
+      return res.status(404).json({ ok: false, message: '抢购等级不存在' });
+    }
+    const fresh = await accountRepo.findById(accountId);
+    res.json({ ok: true, level, account: accountRepo.toPublicAccount(fresh) });
+  } catch (e) {
+    res.status(400).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+app.post('/api/accounts/:id/levels/:levelId/delete', async (req, res) => {
+  try {
+    const accountId = Number(req.params.id);
+    const levelId = Number(req.params.levelId);
+    const account = await accountRepo.findById(accountId);
+    if (!account) return res.status(404).json({ ok: false, message: '账号不存在' });
+    const level = await accountRepo.deleteSeckillLevel(levelId);
+    if (!level || String(level.mobile) !== String(account.mobile)) {
+      return res.status(404).json({ ok: false, message: '抢购等级不存在' });
+    }
+    const fresh = await accountRepo.findById(accountId);
+    res.json({
+      ok: true,
+      message: `已删除抢购等级 ${level.vipLevel}`,
+      account: accountRepo.toPublicAccount(fresh),
+    });
+  } catch (e) {
+    res.status(400).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+/** 更新账号主信息（兼容旧入口；次数建议改走等级接口） */
 app.patch('/api/accounts/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -173,6 +250,7 @@ app.patch('/api/accounts/:id', async (req, res) => {
     }
     if (body.successCount !== undefined) patch.successCount = body.successCount;
     if (body.nickname !== undefined) patch.nickname = body.nickname;
+    if (body.buyerNickname !== undefined) patch.buyerNickname = body.buyerNickname;
     if (body.resetSuccess) patch.successCount = 0;
 
     if (!Object.keys(patch).length) {
@@ -180,7 +258,20 @@ app.patch('/api/accounts/:id', async (req, res) => {
     }
 
     const updated = await accountRepo.updateAccount(id, patch);
-    res.json({ ok: true, account: accountRepo.toPublicAccount(updated) });
+    // 若只改主表次数，同步到主等级记录
+    if (patch.targetCount != null || patch.successCount != null) {
+      const main = (updated.levels || []).find(
+        (l) => String(l.vipLevel).toUpperCase() === String(updated.vipLevel).toUpperCase()
+      );
+      if (main && main.id) {
+        await accountRepo.updateSeckillLevel(main.id, {
+          ...(patch.targetCount != null ? { targetCount: patch.targetCount } : {}),
+          ...(patch.successCount != null ? { successCount: patch.successCount } : {}),
+        });
+      }
+    }
+    const fresh = await accountRepo.findById(id);
+    res.json({ ok: true, account: accountRepo.toPublicAccount(fresh) });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message || String(e) });
   }

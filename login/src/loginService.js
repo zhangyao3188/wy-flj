@@ -283,6 +283,34 @@ class LoginService {
     // 账号信息
     const selfRes = await this.client.post(`${C.PAY_API}/api/self`, {});
 
+    // 活动账户名 actAccount（需登录态）
+    let actAccount = null;
+    let actRaw = null;
+    try {
+      await this.client.get(`${C.PAY_API}/api/nlogin`, { params: {} }).catch(() => {});
+      try {
+        await this.client.get(`${C.INF}/v1/web/cooperate/plutus/cookie-exchange`);
+      } catch (_) {}
+      await ensureXsrf(this.client, this.jar);
+      const actRes = await this.client.post(`${C.INF_ACT}/v1/act-web/module/common/actInfo`, {
+        actId: C.ACT_ID,
+      });
+      actRaw = actRes.data || {};
+      const actResult = actRaw.result || actRaw.data || {};
+      actAccount =
+        actResult.actAccount ||
+        actResult.account ||
+        (actResult.user && actResult.user.actAccount) ||
+        null;
+      if (actAccount) {
+        console.log(`[login] actInfo.actAccount=${actAccount}`);
+      } else {
+        console.warn('[login] actInfo 未返回 actAccount');
+      }
+    } catch (e) {
+      console.warn(`[login] actInfo 失败: ${e.message || e}`);
+    }
+
     const vipData = vipRes.data || {};
     const selfData = selfRes.data || {};
     const vipResult = vipData.result || vipData.data || {};
@@ -330,6 +358,7 @@ class LoginService {
     return {
       mobile: String(mobile),
       nickname: String(nickname),
+      actAccount: actAccount ? String(actAccount) : null,
       vipLevel,
       uid,
       godUuid: godCookie ? godCookie.value : null,
@@ -338,6 +367,7 @@ class LoginService {
       cookieHeader: this.jar.getCookieStringSync('https://pay.ds.163.com/'),
       vipRaw: vipData,
       selfRaw: selfData,
+      actRaw,
       loggedInAt: new Date().toISOString(),
     };
   }

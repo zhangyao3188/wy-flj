@@ -17,5 +17,8 @@ module.exports = {
   MPAY_HOST: 'https://mpay-web.g.mkey.163.com',
   SERVICE_MKEY: 'https://service.mkey.163.com',
 
+  /** 活动 actInfo（取 actAccount / currentTime） */
+  ACT_ID: process.env.ACT_ID || '656d6d6b6085e70001ac05df',
+
   UA: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
 };

@@ -6,6 +6,45 @@ function normalizeTargetCount(value) {
   return Math.min(Math.floor(n), 9999);
 }
 
+function normalizeBuyerNickname(value) {
+  if (value == null) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  return s.slice(0, 128);
+}
+
+function normalizeVipLevel(value) {
+  const s = String(value || '')
+    .trim()
+    .toUpperCase();
+  const m = s.match(/^V?(\d{1,2})$/);
+  if (m) return `V${Number(m[1])}`;
+  if (/^V\d+$/.test(s)) return s;
+  return null;
+}
+
+function levelRank(lv) {
+  const m = String(lv || '').match(/(\d+)/);
+  return m ? Number(m[1]) : 0;
+}
+
+function rowToLevel(row) {
+  if (!row) return null;
+  const successCount = Number(row.success_count) || 0;
+  const targetCount = normalizeTargetCount(row.target_count);
+  return {
+    id: row.id,
+    accountId: row.account_id,
+    mobile: row.mobile,
+    vipLevel: row.vip_level,
+    successCount,
+    targetCount,
+    completed: successCount >= targetCount,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function rowToUser(row) {
   if (!row) return null;
   let cookies = [];
@@ -27,6 +66,8 @@ function rowToUser(row) {
     id: row.id,
     mobile: row.mobile,
     nickname: row.nickname,
+    buyerNickname: row.buyer_nickname || null,
+    actAccount: row.act_account || null,
     vipLevel: row.vip_level,
     uid: row.uid,
     godUuid: row.god_uuid,
@@ -38,21 +79,61 @@ function rowToUser(row) {
     status: row.status,
     successCount: Number(row.success_count) || 0,
     targetCount: normalizeTargetCount(row.target_count),
+    levels: row._levels || [],
     loggedInAt: row.logged_in_at,
     updatedAt: row.updated_at,
   };
 }
 
+async function listLevelsByMobile(mobile) {
+  const rows = await db.query(
+    `SELECT * FROM account_seckill_levels WHERE mobile = ? ORDER BY vip_level ASC`,
+    [String(mobile)]
+  );
+  return rows.map(rowToLevel).sort((a, b) => levelRank(a.vipLevel) - levelRank(b.vipLevel));
+}
+
+async function attachLevels(user) {
+  if (!user) return null;
+  try {
+    user.levels = await listLevelsByMobile(user.mobile);
+  } catch (e) {
+    user.levels = [];
+  }
+  if (!user.levels.length) {
+    user.levels = [
+      {
+        id: null,
+        accountId: user.id,
+        mobile: user.mobile,
+        vipLevel: user.vipLevel || 'V1',
+        successCount: user.successCount || 0,
+        targetCount: user.targetCount || 1,
+        completed: (user.successCount || 0) >= (user.targetCount || 1),
+      },
+    ];
+  }
+  return user;
+}
+
 async function upsertAccount(user) {
   const mobile = String(user.mobile);
   const targetCount = normalizeTargetCount(user.targetCount);
+  const vipLevel = normalizeVipLevel(user.vipLevel) || 'V1';
+  const buyerNickname = normalizeBuyerNickname(user.buyerNickname);
+  const actAccount =
+    user.actAccount != null && String(user.actAccount).trim()
+      ? String(user.actAccount).trim().slice(0, 128)
+      : null;
   const sql = `
     INSERT INTO accounts (
-      mobile, nickname, vip_level, uid, god_uuid, device_id,
+      mobile, nickname, buyer_nickname, act_account, vip_level, uid, god_uuid, device_id,
       cookies_json, cookie_header, vip_raw, self_raw, status, target_count, logged_in_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
     ON DUPLICATE KEY UPDATE
       nickname = VALUES(nickname),
+      buyer_nickname = COALESCE(VALUES(buyer_nickname), buyer_nickname),
+      act_account = COALESCE(VALUES(act_account), act_account),
       vip_level = VALUES(vip_level),
       uid = VALUES(uid),
       god_uuid = VALUES(god_uuid),
@@ -68,7 +149,9 @@ async function upsertAccount(user) {
   await db.query(sql, [
     mobile,
     user.nickname || null,
-    user.vipLevel || 'V1',
+    buyerNickname,
+    actAccount,
+    vipLevel,
     user.uid || null,
     user.godUuid || null,
     user.deviceId || null,
@@ -79,37 +162,151 @@ async function upsertAccount(user) {
     targetCount,
     user.loggedInAt ? new Date(user.loggedInAt) : new Date(),
   ]);
-  return findByMobile(mobile);
+  const saved = await findByMobileRaw(mobile);
+  if (saved) {
+    await ensureSeckillLevel({
+      accountId: saved.id,
+      mobile: saved.mobile,
+      vipLevel,
+      targetCount,
+      syncTarget: true,
+    });
+  }
+  return attachLevels(saved);
 }
 
-async function findByMobile(mobile) {
+async function findByMobileRaw(mobile) {
   const rows = await db.query('SELECT * FROM accounts WHERE mobile = ? LIMIT 1', [
     String(mobile),
   ]);
   return rowToUser(rows[0]);
 }
 
+async function ensureSeckillLevel({
+  accountId,
+  mobile,
+  vipLevel,
+  targetCount = 1,
+  syncTarget = false,
+}) {
+  const level = normalizeVipLevel(vipLevel);
+  if (!level) throw new Error('无效的会员等级');
+  const target = normalizeTargetCount(targetCount);
+  if (syncTarget) {
+    await db.query(
+      `INSERT INTO account_seckill_levels (account_id, mobile, vip_level, target_count, success_count)
+       VALUES (?, ?, ?, ?, 0)
+       ON DUPLICATE KEY UPDATE
+         account_id = VALUES(account_id),
+         target_count = VALUES(target_count)`,
+      [Number(accountId), String(mobile), level, target]
+    );
+  } else {
+    await db.query(
+      `INSERT INTO account_seckill_levels (account_id, mobile, vip_level, target_count, success_count)
+       VALUES (?, ?, ?, ?, 0)
+       ON DUPLICATE KEY UPDATE account_id = VALUES(account_id)`,
+      [Number(accountId), String(mobile), level, target]
+    );
+  }
+  const rows = await db.query(
+    `SELECT * FROM account_seckill_levels WHERE mobile = ? AND vip_level = ? LIMIT 1`,
+    [String(mobile), level]
+  );
+  return rowToLevel(rows[0]);
+}
+
+async function addSeckillLevel(accountId, { vipLevel, targetCount } = {}) {
+  const account = await findById(accountId);
+  if (!account) throw new Error('账号不存在');
+  const level = normalizeVipLevel(vipLevel);
+  if (!level) throw new Error('请填写有效等级，如 V5');
+  const maxRank = levelRank(account.vipLevel);
+  if (maxRank > 0 && levelRank(level) > maxRank) {
+    throw new Error(`不能超过账号最大档位 ${account.vipLevel}`);
+  }
+  const existing = await db.query(
+    `SELECT id FROM account_seckill_levels WHERE mobile = ? AND vip_level = ? LIMIT 1`,
+    [account.mobile, level]
+  );
+  if (existing.length) throw new Error(`该账号已存在抢购等级 ${level}`);
+  return ensureSeckillLevel({
+    accountId: account.id,
+    mobile: account.mobile,
+    vipLevel: level,
+    targetCount: targetCount != null ? targetCount : 1,
+    syncTarget: true,
+  });
+}
+
+async function updateSeckillLevel(levelId, patch = {}) {
+  const rows = await db.query(`SELECT * FROM account_seckill_levels WHERE id = ? LIMIT 1`, [
+    Number(levelId),
+  ]);
+  const row = rows[0];
+  if (!row) return null;
+  const fields = [];
+  const params = [];
+  if (patch.targetCount != null) {
+    fields.push('target_count = ?');
+    params.push(normalizeTargetCount(patch.targetCount));
+  }
+  if (patch.successCount != null) {
+    fields.push('success_count = ?');
+    params.push(Math.max(0, Math.floor(Number(patch.successCount) || 0)));
+  }
+  if (patch.resetSuccess) {
+    fields.push('success_count = ?');
+    params.push(0);
+  }
+  if (!fields.length) return rowToLevel(row);
+  params.push(Number(levelId));
+  await db.query(`UPDATE account_seckill_levels SET ${fields.join(', ')} WHERE id = ?`, params);
+  const updated = await db.query(`SELECT * FROM account_seckill_levels WHERE id = ? LIMIT 1`, [
+    Number(levelId),
+  ]);
+  return rowToLevel(updated[0]);
+}
+
+async function deleteSeckillLevel(levelId) {
+  const rows = await db.query(`SELECT * FROM account_seckill_levels WHERE id = ? LIMIT 1`, [
+    Number(levelId),
+  ]);
+  const row = rows[0];
+  if (!row) return null;
+  const levels = await listLevelsByMobile(row.mobile);
+  if (levels.length <= 1) {
+    throw new Error('至少保留一个抢购等级');
+  }
+  await db.query(`DELETE FROM account_seckill_levels WHERE id = ?`, [Number(levelId)]);
+  return rowToLevel(row);
+}
+
+async function findByMobile(mobile) {
+  return attachLevels(await findByMobileRaw(mobile));
+}
+
 async function listActiveAccounts() {
   const rows = await db.query(
     'SELECT * FROM accounts WHERE status = 1 ORDER BY updated_at DESC'
   );
-  return rows.map(rowToUser);
+  const users = rows.map(rowToUser);
+  for (const u of users) await attachLevels(u);
+  return users;
 }
 
-/** 全部账号（含停用） */
 async function listAllAccounts() {
   const rows = await db.query('SELECT * FROM accounts ORDER BY updated_at DESC');
-  return rows.map(rowToUser);
+  const users = rows.map(rowToUser);
+  for (const u of users) await attachLevels(u);
+  return users;
 }
 
 async function findById(id) {
   const rows = await db.query('SELECT * FROM accounts WHERE id = ? LIMIT 1', [Number(id)]);
-  return rowToUser(rows[0]);
+  return attachLevels(rowToUser(rows[0]));
 }
 
-/**
- * 更新管理字段：targetCount / status / successCount / nickname
- */
 async function updateAccount(id, patch = {}) {
   const fields = [];
   const params = [];
@@ -130,6 +327,10 @@ async function updateAccount(id, patch = {}) {
     fields.push('nickname = ?');
     params.push(patch.nickname ? String(patch.nickname) : null);
   }
+  if (patch.buyerNickname !== undefined) {
+    fields.push('buyer_nickname = ?');
+    params.push(normalizeBuyerNickname(patch.buyerNickname));
+  }
   if (!fields.length) return findById(id);
   params.push(Number(id));
   await db.query(`UPDATE accounts SET ${fields.join(', ')} WHERE id = ?`, params);
@@ -139,6 +340,10 @@ async function updateAccount(id, patch = {}) {
 async function deleteAccount(id) {
   const existing = await findById(id);
   if (!existing) return null;
+  await db.query('DELETE FROM account_seckill_levels WHERE account_id = ? OR mobile = ?', [
+    Number(id),
+    existing.mobile,
+  ]);
   await db.query('DELETE FROM accounts WHERE id = ?', [Number(id)]);
   return existing;
 }
@@ -146,32 +351,51 @@ async function deleteAccount(id) {
 async function deleteAccountByMobile(mobile) {
   const existing = await findByMobile(mobile);
   if (!existing) return null;
+  await db.query('DELETE FROM account_seckill_levels WHERE mobile = ?', [String(mobile)]);
   await db.query('DELETE FROM accounts WHERE mobile = ?', [String(mobile)]);
   return existing;
 }
 
-/** API 列表用：不含 cookie 等敏感字段 */
 function toPublicAccount(user) {
   if (!user) return null;
+  const levels = (user.levels || []).map((l) => ({
+    id: l.id,
+    vipLevel: l.vipLevel,
+    successCount: l.successCount || 0,
+    targetCount: l.targetCount || 1,
+    completed: !!l.completed,
+  }));
+  const activeLevels = levels.filter((l) => !l.completed);
   return {
     id: user.id,
     mobile: user.mobile,
     nickname: user.nickname,
+    buyerNickname: user.buyerNickname || null,
+    actAccount: user.actAccount || null,
     vipLevel: user.vipLevel,
     uid: user.uid,
     status: user.status,
     successCount: user.successCount || 0,
     targetCount: user.targetCount || 1,
-    completed: (user.successCount || 0) >= (user.targetCount || 1),
+    completed:
+      levels.length > 0
+        ? activeLevels.length === 0
+        : (user.successCount || 0) >= (user.targetCount || 1),
+    levels,
     loggedInAt: user.loggedInAt,
     updatedAt: user.updatedAt,
   };
 }
 
-async function createLoginSession({ token, expiresAt, targetCount }) {
+async function createLoginSession({ token, expiresAt, targetCount, buyerNickname }) {
   await db.query(
-    `INSERT INTO login_sessions (token, status, target_count, expires_at) VALUES (?, 'pending', ?, ?)`,
-    [token, normalizeTargetCount(targetCount), expiresAt]
+    `INSERT INTO login_sessions (token, status, target_count, buyer_nickname, expires_at) VALUES (?, 'pending', ?, ?, ?)`,
+    [
+      token,
+      normalizeTargetCount(targetCount),
+      normalizeBuyerNickname(buyerNickname),
+      expiresAt,
+    ]
   );
   return findLoginSession(token);
 }
@@ -211,4 +435,13 @@ module.exports = {
   updateLoginSession,
   rowToUser,
   normalizeTargetCount,
+  normalizeBuyerNickname,
+  normalizeVipLevel,
+  levelRank,
+  listLevelsByMobile,
+  ensureSeckillLevel,
+  addSeckillLevel,
+  updateSeckillLevel,
+  deleteSeckillLevel,
+  attachLevels,
 };

@@ -59,7 +59,8 @@
       margin-bottom: 8px;
     }
     .field { margin-bottom: 18px; }
-    input[type="number"] {
+    input[type="number"],
+    input[type="text"] {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -69,7 +70,8 @@
       outline: none;
       background: #fff;
     }
-    input[type="number"]:focus {
+    input[type="number"]:focus,
+    input[type="text"]:focus {
       border-color: #f5a09a;
       box-shadow: 0 0 0 3px rgba(230, 0, 18, 0.12);
     }
@@ -111,7 +113,12 @@
   <div class="panel">
     <div class="brand">福利金账号</div>
     <h1>登录网易账号</h1>
-    <p>先填写本账号要抢购的次数，再开始登录。成功次数达到设定值后，该账号将不再参与抢购。</p>
+    <p>先填写买家昵称与抢购次数，再开始登录。成功次数达到设定值后，该账号对应等级将不再参与抢购。</p>
+    <div class="field">
+      <label for="buyerNickname">买家昵称</label>
+      <input id="buyerNickname" type="text" maxlength="128" placeholder="例如：张三店铺" />
+      <div class="field-hint">选填，用于管理识别；旧账号默认为空，可在管理页修改。</div>
+    </div>
     <div class="field">
       <label for="targetCount">抢购次数 <span style="color:var(--accent)">*</span></label>
       <input id="targetCount" type="number" min="1" max="9999" step="1" required placeholder="例如 1" />
@@ -125,6 +132,7 @@
     const btn = document.getElementById('btn');
     const msg = document.getElementById('msg');
     const targetInput = document.getElementById('targetCount');
+    const buyerInput = document.getElementById('buyerNickname');
     btn.addEventListener('click', async () => {
       const raw = String(targetInput.value || '').trim();
       if (!raw) {
@@ -140,6 +148,7 @@
         targetInput.focus();
         return;
       }
+      const buyerNickname = String(buyerInput.value || '').trim();
       btn.disabled = true;
       msg.className = 'hint';
       msg.textContent = '正在创建登录会话…';
@@ -147,7 +156,7 @@
         const res = await fetch('/api/login/session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ targetCount }),
+          body: JSON.stringify({ targetCount, buyerNickname }),
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.message || '创建失败');

@@ -113,7 +113,7 @@ function attachGlHeaders(client, jar, { deviceId, godUuid }) {
       }
     }
 
-    config.metadata = { startAt: nowMs() };
+    config.metadata = { ...(config.metadata || {}), startAt: nowMs() };
     return config;
   });
 }
@@ -178,6 +178,7 @@ function logHttpExchange(writer, config, response, error) {
     body: config ? parseBody(config.data) : null,
   };
   const headers = formatHeaders(config && config.headers);
+  const meta = (config && config.metadata) || {};
   let result;
   if (error && !response) {
     result = {
@@ -195,6 +196,15 @@ function logHttpExchange(writer, config, response, error) {
   writer.write(
     [
       sep,
+      meta.fireOffsetLabel
+        ? `[开火偏移] ${meta.fireOffsetLabel}${
+            meta.fireOffsetMs != null
+              ? `（相对开抢 ${Number(meta.fireOffsetMs) >= 0 ? '+' : ''}${meta.fireOffsetMs}ms）`
+              : ''
+          }`
+        : null,
+      meta.fireBaseAt != null ? `[目标开抢] ${formatServerTime(meta.fireBaseAt)}` : null,
+      meta.fireAt != null ? `[实际开火] ${formatServerTime(meta.fireAt)}` : null,
       `[请求时间] ${formatServerTime(startAt)}`,
       `[响应时间] ${formatServerTime(endAt)}`,
       `[耗时] ${costMs}ms`,
@@ -205,7 +215,9 @@ function logHttpExchange(writer, config, response, error) {
       `[响应结果] ${JSON.stringify(result)}`,
       sep,
       '',
-    ].join('\n')
+    ]
+      .filter((line) => line != null)
+      .join('\n')
   );
 }
 
@@ -556,12 +568,42 @@ async function fetchShowingList(client) {
   return res.data;
 }
 
-async function acquire(client, { couponId, stockId }) {
-  const res = await client.post(`${INF}/v1/web/exp/week-coupon/acquire`, {
-    couponId,
-    stockId,
-  });
+async function acquire(client, { couponId, stockId, fireMeta } = {}) {
+  const config = {};
+  if (fireMeta && typeof fireMeta === 'object') {
+    config.metadata = { ...fireMeta };
+  }
+  const res = await client.post(
+    `${INF}/v1/web/exp/week-coupon/acquire`,
+    {
+      couponId,
+      stockId,
+    },
+    config
+  );
   return res.data;
+}
+
+/**
+ * POST actInfo，返回 result（含 currentTime / actAccount）
+ */
+async function fetchActInfo(client) {
+  const res = await client.post(`${INF_ACT}/v1/act-web/module/common/actInfo`, {
+    actId: ACT_INFO_ID,
+  });
+  const data = res.data || {};
+  return data.result || data.data || data || {};
+}
+
+/** 从 actInfo 取账户名称 actAccount */
+async function fetchActAccount(client) {
+  const result = await fetchActInfo(client);
+  const actAccount =
+    result.actAccount ||
+    result.account ||
+    (result.user && result.user.actAccount) ||
+    null;
+  return actAccount ? String(actAccount).trim() : null;
 }
 
 /**
@@ -570,15 +612,11 @@ async function acquire(client, { couponId, stockId }) {
  */
 async function syncServerTime(client) {
   const localBefore = Date.now();
-  const res = await client.post(`${INF_ACT}/v1/act-web/module/common/actInfo`, {
-    actId: ACT_INFO_ID,
-  });
+  const result = await fetchActInfo(client);
   const localAfter = Date.now();
-  const data = res.data || {};
-  const result = data.result || data.data || {};
   const currentTime = Number(result.currentTime);
   if (!Number.isFinite(currentTime)) {
-    throw new Error(`actInfo 未返回 currentTime: ${JSON.stringify(data).slice(0, 200)}`);
+    throw new Error(`actInfo 未返回 currentTime: ${JSON.stringify(result).slice(0, 200)}`);
   }
   const localMid = Math.floor((localBefore + localAfter) / 2);
   serverOffsetMs = currentTime - localMid;
@@ -660,6 +698,8 @@ module.exports = {
   findSamePeriod,
   fetchShowingList,
   acquire,
+  fetchActInfo,
+  fetchActAccount,
   syncServerTime,
   nowMs,
   getServerOffsetMs,

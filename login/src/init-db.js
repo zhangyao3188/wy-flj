@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS \`accounts\` (
   \`id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   \`mobile\` VARCHAR(20) NOT NULL,
   \`nickname\` VARCHAR(128) NULL,
+  \`buyer_nickname\` VARCHAR(128) NULL COMMENT '买家昵称（登录/管理页填写）',
+  \`act_account\` VARCHAR(128) NULL COMMENT '账户名称 actInfo.actAccount',
   \`vip_level\` VARCHAR(16) NOT NULL DEFAULT 'V1',
   \`uid\` VARCHAR(64) NULL,
   \`god_uuid\` VARCHAR(64) NULL,
@@ -62,6 +64,7 @@ CREATE TABLE IF NOT EXISTS \`login_sessions\` (
   \`token\` VARCHAR(64) NOT NULL,
   \`status\` VARCHAR(32) NOT NULL DEFAULT 'pending',
   \`target_count\` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '本次登录设定的抢购次数',
+  \`buyer_nickname\` VARCHAR(128) NULL COMMENT '本次登录填写的买家昵称',
   \`mobile\` VARCHAR(20) NULL,
   \`account_id\` BIGINT UNSIGNED NULL,
   \`message\` VARCHAR(512) NULL,
@@ -106,6 +109,72 @@ CREATE TABLE IF NOT EXISTS \`login_sessions\` (
     if (!/Duplicate column/i.test(e.message || '')) {
       console.warn(`[init-db] login_sessions.target_count 列: ${e.message}`);
     }
+  }
+
+  try {
+    await conn.query(
+      `ALTER TABLE \`accounts\` ADD COLUMN \`buyer_nickname\` VARCHAR(128) NULL COMMENT '买家昵称（登录/管理页填写）' AFTER \`nickname\``
+    );
+    console.log('[init-db] added accounts.buyer_nickname');
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      console.warn(`[init-db] buyer_nickname 列: ${e.message}`);
+    }
+  }
+
+  try {
+    await conn.query(
+      `ALTER TABLE \`accounts\` ADD COLUMN \`act_account\` VARCHAR(128) NULL COMMENT '账户名称 actInfo.actAccount' AFTER \`buyer_nickname\``
+    );
+    console.log('[init-db] added accounts.act_account');
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      console.warn(`[init-db] act_account 列: ${e.message}`);
+    }
+  }
+
+  try {
+    await conn.query(
+      `ALTER TABLE \`login_sessions\` ADD COLUMN \`buyer_nickname\` VARCHAR(128) NULL COMMENT '本次登录填写的买家昵称' AFTER \`target_count\``
+    );
+    console.log('[init-db] added login_sessions.buyer_nickname');
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      console.warn(`[init-db] login_sessions.buyer_nickname 列: ${e.message}`);
+    }
+  }
+
+  await conn.query(`
+CREATE TABLE IF NOT EXISTS \`account_seckill_levels\` (
+  \`id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  \`account_id\` BIGINT UNSIGNED NOT NULL,
+  \`mobile\` VARCHAR(20) NOT NULL,
+  \`vip_level\` VARCHAR(16) NOT NULL,
+  \`target_count\` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '该等级设定抢购次数',
+  \`success_count\` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '该等级真实抢购成功次数',
+  \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`uk_mobile_level\` (\`mobile\`, \`vip_level\`),
+  KEY \`idx_account_id\` (\`account_id\`),
+  KEY \`idx_mobile\` (\`mobile\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`);
+  console.log('[init-db] ensure account_seckill_levels');
+
+  // 旧账号迁移：无等级记录时，用 accounts 主等级 + 次数生成一条
+  const [mig] = await conn.query(`
+    INSERT INTO account_seckill_levels (account_id, mobile, vip_level, target_count, success_count)
+    SELECT a.id, a.mobile, a.vip_level,
+           COALESCE(NULLIF(a.target_count, 0), 1),
+           COALESCE(a.success_count, 0)
+    FROM accounts a
+    WHERE NOT EXISTS (
+      SELECT 1 FROM account_seckill_levels l WHERE l.mobile = a.mobile
+    )
+  `);
+  if (mig && mig.affectedRows) {
+    console.log(`[init-db] migrated ${mig.affectedRows} accounts → account_seckill_levels`);
   }
 
   await conn.end();

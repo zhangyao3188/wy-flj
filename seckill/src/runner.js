@@ -29,23 +29,95 @@ const {
   sleep,
 } = require('./client');
 
-/** 开抢前多少毫秒开始发 acquire（可用 env FIRE_EARLY_MS 覆盖，默认 100） */
-function resolveFireEarlyMs(options = {}) {
-  if (options.fireEarlyMs != null && Number.isFinite(Number(options.fireEarlyMs))) {
-    return Math.max(0, Number(options.fireEarlyMs));
+/**
+ * 开火偏移区间（毫秒，env FIRE_EARLY_MS）
+ * 约定：负数=提前，正数=延后；实际开火 = 开抢时间 + offset
+ * 支持：[0,100] / [-100,200] / 0,100 / 单个数字（固定偏移）
+ * 多账号时在区间内各自随机一个整数毫秒。
+ */
+function parseFireOffsetRange(raw) {
+  if (raw == null || raw === '') return { min: 0, max: 0 };
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    const a = Number(raw.min);
+    const b = Number(raw.max != null ? raw.max : raw.min);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return { min: 0, max: 0 };
+    return normalizeFireOffsetRange(a, b);
   }
-  const fromEnv = Number(process.env.FIRE_EARLY_MS);
-  if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv;
-  return 100;
+  if (Array.isArray(raw) && raw.length >= 1) {
+    const a = Number(raw[0]);
+    const b = Number(raw.length > 1 ? raw[1] : raw[0]);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return { min: 0, max: 0 };
+    return normalizeFireOffsetRange(a, b);
+  }
+  const s = String(raw).trim();
+  const m = s.match(/^\[?\s*(-?\d+)\s*[,，]\s*(-?\d+)\s*\]?$/);
+  if (m) return normalizeFireOffsetRange(Number(m[1]), Number(m[2]));
+  const n = Number(s);
+  if (Number.isFinite(n)) return normalizeFireOffsetRange(n, n);
+  return { min: 0, max: 0 };
 }
 
-const FIRE_EARLY_MS = resolveFireEarlyMs();
+function normalizeFireOffsetRange(a, b) {
+  let min = Math.trunc(a);
+  let max = Math.trunc(b);
+  if (min > max) {
+    const t = min;
+    min = max;
+    max = t;
+  }
+  // 限制在 ±60s
+  min = Math.max(-60000, Math.min(60000, min));
+  max = Math.max(-60000, Math.min(60000, max));
+  if (min > max) {
+    const t = min;
+    min = max;
+    max = t;
+  }
+  return { min, max };
+}
+
+function resolveFireOffsetRange(options = {}) {
+  if (options.fireOffsetRange != null) return parseFireOffsetRange(options.fireOffsetRange);
+  if (options.fireEarlyMs != null) return parseFireOffsetRange(options.fireEarlyMs);
+  return parseFireOffsetRange(process.env.FIRE_EARLY_MS);
+}
+
+/** 在 [min, max] 内随机整数偏移（含端点） */
+function sampleFireOffset(range) {
+  const r = range && Number.isFinite(range.min) ? range : { min: 0, max: 0 };
+  const lo = r.min;
+  const hi = r.max;
+  if (lo === hi) return lo;
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
+}
+
+/** 负=提前，正=延后 */
+function formatFireOffsetLabel(offsetMs) {
+  const n = Number(offsetMs) || 0;
+  if (n < 0) return `提前 ${Math.abs(n)}ms`;
+  if (n > 0) return `延后 ${n}ms`;
+  return `准时 0ms`;
+}
+
+function formatFireRangeLabel(range) {
+  const r = range || { min: 0, max: 0 };
+  return `[${r.min}, ${r.max}]`;
+}
+
+/** @deprecated 兼容旧调用：返回区间中点（不再用于开火） */
+function resolveFireEarlyMs(options = {}) {
+  const r = resolveFireOffsetRange(options);
+  return Math.round((r.min + r.max) / 2);
+}
+
+const FIRE_OFFSET_RANGE = resolveFireOffsetRange();
+const FIRE_EARLY_MS = FIRE_OFFSET_RANGE; // 兼容导出名，值为区间对象
 /** 开抢前多少毫秒再预热一遍 */
 const WARMUP_BEFORE_MS = 15000;
 /** 正式倒计时展示窗口（末 N 毫秒精确到 ms） */
 const COUNTDOWN_LAST_MS = 10000;
-/** 测试模式模拟倒计时时长（未指定 --at 时） */
-const TEST_COUNTDOWN_MS = 5000;
+/** 测试模式：距整分不足该秒数时跳到下下整分（默认 50） */
+const TEST_MINUTE_SEC_THRESHOLD = 50;
 
 /**
  * 解析测试开抢时间。
@@ -92,7 +164,22 @@ function parseTestStartTime(input, refNow = Date.now()) {
 }
 
 /**
- * 测试模式开火时刻：有 --at 用指定时间，否则 now + 5s
+ * 测试模式默认开火目标时刻（服务器时间）：
+ * - 当前秒 < 50 → 下一个整分（如 01:20 → 02:00.000）
+ * - 当前秒 ≥ 50 → 下下个整分（如 01:51 → 03:00.000）
+ * 仍可用 --at / testStartAt 显式指定。
+ */
+function resolveNextWholeMinuteFireAt(now = nowMs(), thresholdSec = TEST_MINUTE_SEC_THRESHOLD) {
+  const d = new Date(now);
+  const minuteStart = new Date(d);
+  minuteStart.setSeconds(0, 0);
+  const sec = d.getSeconds();
+  const addMinutes = sec < thresholdSec ? 1 : 2;
+  return minuteStart.getTime() + addMinutes * 60 * 1000;
+}
+
+/**
+ * 测试模式开火时刻：有 --at 用指定时间，否则取「下一整分 / 下下整分」规则。
  */
 function resolveTestFireAt(options = {}, now = nowMs()) {
   if (options.testStartAtMs != null && Number.isFinite(Number(options.testStartAtMs))) {
@@ -101,9 +188,14 @@ function resolveTestFireAt(options = {}, now = nowMs()) {
   if (options.testStartAt) {
     return parseTestStartTime(options.testStartAt, now);
   }
-  const testCountdownMs =
-    options.testCountdownMs != null ? options.testCountdownMs : TEST_COUNTDOWN_MS;
-  return now + testCountdownMs;
+  if (options.testCountdownMs != null && Number.isFinite(Number(options.testCountdownMs))) {
+    return now + Math.max(0, Number(options.testCountdownMs));
+  }
+  const threshold =
+    options.testMinuteSecThreshold != null
+      ? Number(options.testMinuteSecThreshold)
+      : TEST_MINUTE_SEC_THRESHOLD;
+  return resolveNextWholeMinuteFireAt(now, Number.isFinite(threshold) ? threshold : 50);
 }
 
 function resolveAcquireIntervalMs(options = {}) {
@@ -188,7 +280,7 @@ async function persistCookies(user, jar, tag = '', extra = {}) {
  * 等级以 get-info.currentLv 为准（账号最大可抢档位）；若过期则更新 cookie。
  */
 async function warmupSession(account, { label = '预热' } = {}) {
-  const tag = `[${account.mobile}] `;
+  const tag = `[${account.mobile}/${account.forceVipLevel || account.vipLevel || '?'}] `;
   const { client, jar, user } = account;
   console.log(`${tag}${label}开始…`);
 
@@ -234,22 +326,34 @@ async function warmupSession(account, { label = '预热' } = {}) {
   }
 
   const listResult = listResp.result || listResp.data || listResp;
-  const vipLevel = resolveMaxVipLevel(
+  const maxVipLevel = resolveMaxVipLevel(
     vipData,
     listResult,
-    account.vipLevel || (user && user.vipLevel) || 'V1'
+    account.maxVipLevel || (user && user.maxVipLevel) || (user && user.vipLevel) || 'V1'
   );
-  account.vipLevel = vipLevel;
-  if (user) user.vipLevel = vipLevel;
+  account.maxVipLevel = maxVipLevel;
+  // 指定抢购等级（多等级并行）；否则用最大档
+  const seckillLevel = normalizeLevel(
+    account.forceVipLevel || account.seckillLevel || account.vipLevel || maxVipLevel
+  );
+  account.vipLevel = seckillLevel;
+  if (user) {
+    user.maxVipLevel = maxVipLevel;
+    // 不覆盖 user 主档；抢购用 account.vipLevel
+  }
 
   await persistCookies(user || { mobile: account.mobile }, jar, tag, {
-    vipLevel,
+    vipLevel: maxVipLevel,
     vipRaw: vipData,
   });
 
-  console.log(`${tag}${label}账号最大档位=${vipLevel}（来源 get-info.currentLv）`);
+  console.log(
+    `${tag}${label}账号最大档位=${maxVipLevel}；本任务抢购档=${seckillLevel}${
+      seckillLevel !== maxVipLevel ? '（低于最大档）' : ''
+    }`
+  );
 
-  const { target, reason, candidates } = pickTargetByVip(listResult, vipLevel);
+  const { target, reason, candidates } = pickTargetByVip(listResult, seckillLevel);
   if (!target || !target.couponId || !Number.isFinite(target.seckillStartTime)) {
     throw new Error(`选品失败: ${reason}; candidates=${candidates.length}`);
   }
@@ -262,9 +366,8 @@ async function warmupSession(account, { label = '预热' } = {}) {
     console.log(`${tag}${label}本场已领取，将跳过抢购`);
   }
 
-  const ready = await preparePayload(client, target, candidates, {
-    allowBorrowStock: !!account._immediate,
-  });
+  // 测试与正式同一套选品/stockId（infer），不再借用其他场次 stockId
+  const ready = await preparePayload(client, target, candidates);
   await ensureXsrf(client, jar);
 
   account.target = target;
@@ -272,7 +375,7 @@ async function warmupSession(account, { label = '预热' } = {}) {
   account.reason = reason;
   account.warmedAt = Date.now();
   console.log(
-    `${tag}${label}完成 档位=${vipLevel} couponId=${ready.couponId} stockId=${ready.stockId} start=${new Date(
+    `${tag}${label}完成 档位=${seckillLevel} couponId=${ready.couponId} stockId=${ready.stockId} start=${new Date(
       ready.seckillStartTime
     ).toLocaleString('zh-CN', { hour12: false })}`
   );
@@ -281,8 +384,9 @@ async function warmupSession(account, { label = '预热' } = {}) {
 
 /**
  * 启动即预备请求参数（couponId / stockId），进入预备态后等待开火。
+ * 测试/正式统一：优先列表 stockId，否则按场次规则推导。
  */
-async function preparePayload(client, target, candidates, { allowBorrowStock = false } = {}) {
+async function preparePayload(client, target, candidates) {
   let ready = { ...target };
 
   if (!ready.stockId) {
@@ -297,15 +401,6 @@ async function preparePayload(client, target, candidates, { allowBorrowStock = f
       }
     } catch (e) {
       if (e && e.resp && isSessionExpired(e.resp)) throw e;
-    }
-  }
-
-  if (!ready.stockId && allowBorrowStock) {
-    const withStock = (candidates || []).find((c) => c.couponId === target.couponId && c.stockId);
-    if (withStock) {
-      ready.stockId = withStock.stockId;
-      ready._borrowedStock = true;
-      ready._borrowedFromStatus = withStock.status;
     }
   }
 
@@ -329,8 +424,6 @@ async function preparePayload(client, target, candidates, { allowBorrowStock = f
     xyLevel: ready.xyLevel,
     stockRemain: ready.stockRemain,
     _inferredStock: !!ready._inferredStock,
-    _borrowedStock: !!ready._borrowedStock,
-    _borrowedFromStatus: ready._borrowedFromStatus || null,
   };
 }
 
@@ -346,14 +439,26 @@ async function fireLoop(client, ready, target, options = {}) {
   let successCount = null;
   let refreshedOn873 = false;
   const startedAt = Date.now();
+  let firstFireMeta = null;
+  if (options.fireOffsetMs != null || options.fireOffsetLabel) {
+    firstFireMeta = {
+      fireOffsetMs: options.fireOffsetMs,
+      fireOffsetLabel:
+        options.fireOffsetLabel || formatFireOffsetLabel(options.fireOffsetMs),
+      fireBaseAt: options.fireBaseAt,
+      fireAt: options.fireAt,
+    };
+  }
 
   while (!success && attempt < maxAttempts) {
     attempt += 1;
     const t0 = Date.now();
     try {
+      const fireMeta = attempt === 1 ? firstFireMeta : null;
       const resp = await acquire(client, {
         couponId: ready.couponId,
         stockId: ready.stockId,
+        ...(fireMeta ? { fireMeta } : {}),
       });
       const cost = Date.now() - t0;
       const code = resp && resp.code;
@@ -368,8 +473,14 @@ async function fireLoop(client, ready, target, options = {}) {
           `${tag}[seckill] SUCCESS #${attempt} ${cost}ms received=true → 停止该账号`
         );
         if (mobile) {
+          const levelForCount =
+            (options && options.vipLevel) ||
+            (ready && ready.xyLevel) ||
+            (user && user.forceVipLevel) ||
+            (user && user.vipLevel) ||
+            null;
           accountRepo
-            .incrementSuccessCount(mobile)
+            .incrementSuccessCount(mobile, levelForCount)
             .then((n) => {
               successCount = n;
               console.log(`${tag}[seckill] 成功次数已异步写入 successCount=${n}`);
@@ -461,20 +572,23 @@ async function prepareAccount(mobile, options = {}) {
     throw new Error(`用户 ${mobile} 在数据库中不存在或已禁用，请先通过 login 在线登录`);
   }
 
-  const immediate = !!options.immediate;
-  // 等级以预热时 get-info 为准；此处仅作初始占位
-  const vipLevel = normalizeLevel(options.vipLevel || user.vipLevel || 'V1');
+  // 等级：多等级任务用 forceVipLevel；否则用账号主档占位
+  const vipLevel = normalizeLevel(
+    options.vipLevel || user.forceVipLevel || user.vipLevel || 'V1'
+  );
   const { client, jar, logFile } = createClientFromUser(user);
 
   const account = {
     mobile: user.mobile,
     nickname: user.nickname,
     vipLevel,
+    forceVipLevel: user.forceVipLevel || options.vipLevel || vipLevel,
+    maxVipLevel: user.maxVipLevel || user.vipLevel,
+    levelId: user.levelId != null ? user.levelId : null,
     client,
     jar,
     logFile,
     user,
-    _immediate: immediate,
     alreadyAcquired: false,
     nloginOk: false,
     hasGodUuid: !!user.godUuid,
@@ -492,11 +606,12 @@ async function prepareAccount(mobile, options = {}) {
 /**
  * 抢购流程：
  * 正式模式：启动预热 → 校准服务器时间 → 开抢前15s再预热 → 末10s毫秒倒计时 → 开抢前100ms 连续 acquire
- * 测试模式：预热 → 模拟 5s 倒计时 → 开火
+ * 测试模式：预热 → 下一整分（秒≥50则下下整分）倒计时 → 开火
  */
 async function runSeckill(mobile, options = {}) {
   const immediate = !!options.immediate;
-  const fireEarlyMs = resolveFireEarlyMs(options);
+  const fireRange = resolveFireOffsetRange(options);
+  const fireOffsetMs = sampleFireOffset(fireRange);
   const warmupBeforeMs =
     options.warmupBeforeMs != null ? options.warmupBeforeMs : WARMUP_BEFORE_MS;
 
@@ -521,6 +636,11 @@ async function runSeckill(mobile, options = {}) {
     `[seckill] stockId=${account.ready.stockId}${account.ready._inferredStock ? ' (推导)' : ''}`
   );
   console.log(`[seckill] seckillStartTime=${account.ready.seckillStartTime} (${startAt})`);
+  console.log(
+    `[seckill] 开火偏移区间 FIRE_EARLY_MS=${formatFireRangeLabel(fireRange)} → 本账号 ${formatFireOffsetLabel(
+      fireOffsetMs
+    )}`
+  );
   console.log('[seckill] ==============================');
 
   // 拿到档位开抢时间后，立刻用服务器时间校准
@@ -539,15 +659,18 @@ async function runSeckill(mobile, options = {}) {
     };
   }
 
+  const baseAt = immediate
+    ? resolveTestFireAt(options, nowMs())
+    : account.ready.seckillStartTime;
+  const fireAt = baseAt + fireOffsetMs;
+  const span = Math.max(Math.abs(fireRange.min), Math.abs(fireRange.max), Math.abs(fireOffsetMs));
+
   if (immediate) {
-    const scheduledAt = resolveTestFireAt(options, nowMs());
-    const fireAt = scheduledAt - fireEarlyMs;
-    const schedText = new Date(scheduledAt).toLocaleString('zh-CN', { hour12: false });
+    const schedText = new Date(baseAt).toLocaleString('zh-CN', { hour12: false });
     const fireText = `${new Date(fireAt).toLocaleString('zh-CN', {
       hour12: false,
     })}.${String(fireAt % 1000).padStart(3, '0')}`;
-    // XSRF 在倒计时前刷完，避免吃掉开火提前量
-    const xsrfAt = fireAt - Math.max(1500, fireEarlyMs + 500);
+    const xsrfAt = fireAt - Math.max(1500, span + 500);
     if (nowMs() < xsrfAt) {
       await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
     }
@@ -555,20 +678,20 @@ async function runSeckill(mobile, options = {}) {
     const left = fireAt - nowMs();
     if (left <= 0) {
       console.log(
-        `[seckill] 测试模式：目标 ${schedText}（提前 ${fireEarlyMs}ms → ${fireText}）已过，立即开火`
+        `[seckill] 测试模式：目标 ${schedText}（${formatFireOffsetLabel(
+          fireOffsetMs
+        )} → ${fireText}）已过，立即开火`
       );
     } else {
       console.log(
-        `[seckill] 测试模式：目标 ${schedText}，提前 ${fireEarlyMs}ms 于 ${fireText} 开火（约 ${formatLeft(
-          left
-        )}，服务器时间）`
+        `[seckill] 测试模式：目标 ${schedText}，${formatFireOffsetLabel(
+          fireOffsetMs
+        )} 于 ${fireText} 开火（约 ${formatLeft(left)}，服务器时间）`
       );
       await waitUntilServer(fireAt, { label: '测试倒计时' });
     }
   } else {
-    const startMs = account.ready.seckillStartTime;
-    const warmAt = startMs - warmupBeforeMs;
-    const fireAt = startMs - fireEarlyMs;
+    const warmAt = baseAt - warmupBeforeMs;
 
     if (nowMs() < warmAt) {
       console.log(
@@ -593,12 +716,10 @@ async function runSeckill(mobile, options = {}) {
           stopReason: 'already_acquired',
         };
       }
-      // 预热后再校准一次，减小时钟漂移
       await calibrateClock(account.client);
     }
 
-    // 开火前刷好 XSRF，到点立刻发 acquire（不再在 fireAt 之后请求）
-    const xsrfAt = fireAt - Math.max(1500, fireEarlyMs + 500);
+    const xsrfAt = fireAt - Math.max(1500, span + 500);
     if (nowMs() < xsrfAt) {
       await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
     }
@@ -606,7 +727,7 @@ async function runSeckill(mobile, options = {}) {
 
     if (nowMs() < fireAt) {
       console.log(
-        `[seckill] 预热完成，将在开抢前 ${fireEarlyMs}ms 开火（约 ${formatLeft(
+        `[seckill] 预热完成，将${formatFireOffsetLabel(fireOffsetMs)}开火（约 ${formatLeft(
           fireAt - nowMs()
         )} 后，目标 ${new Date(fireAt).toLocaleString('zh-CN', {
           hour12: false,
@@ -619,9 +740,7 @@ async function runSeckill(mobile, options = {}) {
   }
 
   console.log(
-    `[seckill] 开始连续抢购（提前 ${fireEarlyMs}ms，FIRE_EARLY_MS${
-      immediate ? '，测试模式' : ''
-    }）…`
+    `[${account.mobile}] 开火 ${formatFireOffsetLabel(fireOffsetMs)} couponId=${account.ready.couponId}`
   );
   const intervalMs = resolveAcquireIntervalMs(options);
   if (intervalMs > 0) {
@@ -635,11 +754,16 @@ async function runSeckill(mobile, options = {}) {
     tag: account.mobile,
     jar: account.jar,
     user: account.user,
+    fireOffsetMs,
+    fireOffsetLabel: formatFireOffsetLabel(fireOffsetMs),
+    fireBaseAt: baseAt,
+    fireAt,
   });
   return {
     ...result,
     mobile: account.mobile,
     vipLevel: account.vipLevel,
+    fireOffsetMs,
   };
 }
 
@@ -654,11 +778,17 @@ module.exports = {
   waitUntilServer,
   parseTestStartTime,
   resolveTestFireAt,
+  resolveNextWholeMinuteFireAt,
   resolveFireEarlyMs,
+  resolveFireOffsetRange,
+  sampleFireOffset,
+  formatFireOffsetLabel,
+  formatFireRangeLabel,
   FIRE_EARLY_MS,
+  FIRE_OFFSET_RANGE,
   WARMUP_BEFORE_MS,
   COUNTDOWN_LAST_MS,
-  TEST_COUNTDOWN_MS,
+  TEST_MINUTE_SEC_THRESHOLD,
 };
 
 function parseCliArgs(argv) {
@@ -708,7 +838,7 @@ if (require.main === module) {
   if (!mobile) {
     console.error('用法:');
     console.error('  npm run seckill -- <手机号>           # 预备后，开抢前100ms开火');
-    console.error('  npm run test:now -- <手机号>          # 测试：5s 倒计时后抢');
+    console.error('  npm run test:now -- <手机号>          # 测试：下一整分开火（秒≥50则下下整分）');
     console.error('  npm run test:now -- <手机号> --at 12:05:00');
     console.error('  npm run test:now -- <手机号> --at "2026-07-31 12:05:00"');
     process.exit(1);
