@@ -260,12 +260,35 @@ class LoginService {
   }
 
   /**
-   * 使用已有 Cookie 完成登录态导入（抓包导入）
+   * 使用已有 Cookie 完成登录态导入（抓包 / curl 导入）
+   * @param {string} mobile
+   * @param {Record<string,string>} cookieMap
+   * @param {{ headers?: Record<string,string> }} [opts]
    */
-  async importCookies(mobile, cookieMap) {
+  async importCookies(mobile, cookieMap, opts = {}) {
     applyCookieMap(this.jar, cookieMap);
+    const headers = opts.headers || {};
+    const glUid =
+      headers['gl-uid'] ||
+      headers['gl_uid'] ||
+      cookieMap.GOD_UUID ||
+      null;
+    if (glUid) {
+      this.client.defaults.headers.common['gl-uid'] = glUid;
+      this.client.defaults.headers.common['GL-Uid'] = glUid;
+    }
+    const deviceFromHeader = headers['gl-deviceid'] || headers['gl-device-id'];
+    if (deviceFromHeader) {
+      this.deviceId = String(deviceFromHeader);
+      this.client.defaults.headers.common['gl-deviceid'] = this.deviceId;
+      this.client.defaults.headers.common['GL-DeviceId'] = this.deviceId;
+    }
     await ensureXsrf(this.client, this.jar);
     const nlogin = await this.client.get(`${C.PAY_API}/api/nlogin`, { params: {} });
+    try {
+      await this.client.get(`${C.INF}/v1/web/cooperate/plutus/cookie-exchange`);
+    } catch (_) {}
+    await ensureXsrf(this.client, this.jar);
     const profile = await this.fetchProfile(mobile);
     return { ok: true, nlogin: nlogin.data, user: profile };
   }
@@ -313,7 +336,12 @@ class LoginService {
 
     const vipData = vipRes.data || {};
     const selfData = selfRes.data || {};
-    const vipResult = vipData.result || vipData.data || {};
+    const vipCode = vipData.code != null ? Number(vipData.code) : NaN;
+    const vipOk = Number.isFinite(vipCode) ? vipCode === 200 || vipCode === 0 : true;
+    const vipResult =
+      vipOk && vipData && typeof vipData === 'object'
+        ? vipData.result || vipData.data || {}
+        : {};
     const selfResult = selfData.result || selfData.data || selfData || {};
 
     // 账号可抢的最大档位 = get-info.currentLv（官方等级接口）
@@ -324,7 +352,8 @@ class LoginService {
       vipResult.vipLevel ||
       (vipResult.user && (vipResult.user.currentLv || vipResult.user.level)) ||
       null;
-    const vipLevel = normalizeVipLevel(rawLv);
+    const vipLevelTrusted = !!(rawLv && vipOk);
+    const vipLevel = vipLevelTrusted ? normalizeVipLevel(rawLv) : null;
 
     const nickname =
       selfResult.nick ||
@@ -347,10 +376,15 @@ class LoginService {
 
     if (godCookie) {
       this.client.defaults.headers.common['gl-uid'] = godCookie.value;
+      this.client.defaults.headers.common['GL-Uid'] = godCookie.value;
     }
 
-    if (!rawLv) {
-      console.warn(`[login] get-info 未返回 currentLv，暂存为 ${vipLevel}`);
+    if (!vipLevelTrusted) {
+      console.warn(
+        `[login] get-info 未拿到 currentLv（code=${vipData.code} ${
+          vipData.errmsg || vipData.msg || ''
+        }），不覆盖已有等级`
+      );
     } else {
       console.log(`[login] 账号最大档位 currentLv=${vipLevel}`);
     }
@@ -359,7 +393,8 @@ class LoginService {
       mobile: String(mobile),
       nickname: String(nickname),
       actAccount: actAccount ? String(actAccount) : null,
-      vipLevel,
+      vipLevel: vipLevel || 'V1',
+      vipLevelTrusted,
       uid,
       godUuid: godCookie ? godCookie.value : null,
       deviceId: this.deviceId,

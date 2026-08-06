@@ -36,7 +36,7 @@ async function main() {
   await conn.query(`
 CREATE TABLE IF NOT EXISTS \`accounts\` (
   \`id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  \`mobile\` VARCHAR(20) NOT NULL,
+  \`mobile\` VARCHAR(20) NULL COMMENT '手机号（可空，curl 导入解析不到时留空）',
   \`nickname\` VARCHAR(128) NULL,
   \`buyer_nickname\` VARCHAR(128) NULL COMMENT '买家昵称（登录/管理页填写）',
   \`act_account\` VARCHAR(128) NULL COMMENT '账户名称 actInfo.actAccount',
@@ -131,6 +131,15 @@ CREATE TABLE IF NOT EXISTS \`login_sessions\` (
     if (!/Duplicate column/i.test(e.message || '')) {
       console.warn(`[init-db] act_account 列: ${e.message}`);
     }
+  }
+
+  try {
+    await conn.query(
+      `ALTER TABLE \`accounts\` MODIFY COLUMN \`mobile\` VARCHAR(20) NULL COMMENT '手机号（可空，curl 导入解析不到时留空）'`
+    );
+    console.log('[init-db] accounts.mobile nullable');
+  } catch (e) {
+    console.warn(`[init-db] mobile nullable: ${e.message}`);
   }
 
   try {

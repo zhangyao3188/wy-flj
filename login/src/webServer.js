@@ -8,6 +8,9 @@ if (fs.existsSync(localEnv)) require('dotenv').config({ path: localEnv });
 const db = require('./db');
 const accountRepo = require('./accountRepo');
 const { SessionManager } = require('./sessionManager');
+const { parseCurlOrCookies } = require('./parseCurl');
+const { createSession } = require('./http');
+const { LoginService } = require('./loginService');
 
 const app = express();
 const manager = new SessionManager();
@@ -18,7 +21,7 @@ const PUBLIC_URL = (
   `http://127.0.0.1:${PORT}`
 ).replace(/\/$/, '');
 
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '4mb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.get('/health', async (_req, res) => {
@@ -116,6 +119,148 @@ app.post('/api/login/session/:token/extract', async (req, res) => {
       mobile: req.body && req.body.mobile,
     });
     res.json(result);
+  } catch (e) {
+    res.status(400).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+/**
+ * Curl / Cookie 抓包导入（其他设备登录后复制 curl）
+ * body: { curl|raw, mobile?, targetCount, buyerNickname? }
+ */
+app.post('/api/login/curl', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const raw = String(body.curl || body.raw || body.text || '').trim();
+    if (!raw) {
+      return res.status(400).json({ ok: false, message: '请粘贴 curl 或 Cookie 原文' });
+    }
+    if (body.targetCount == null || String(body.targetCount).trim() === '') {
+      return res.status(400).json({ ok: false, message: '请填写抢购次数' });
+    }
+    if (Number(body.targetCount) < 1 || !Number.isFinite(Number(body.targetCount))) {
+      return res.status(400).json({ ok: false, message: '抢购次数须为大于等于 1 的整数' });
+    }
+    const targetCount = accountRepo.normalizeTargetCount(body.targetCount);
+    const buyerNickname = accountRepo.normalizeBuyerNickname(body.buyerNickname);
+
+    const parsed = parseCurlOrCookies(raw);
+    if (!parsed.cookieCount) {
+      return res.status(400).json({
+        ok: false,
+        message:
+          '未解析到 Cookie。请粘贴完整 curl（含 -H \'Cookie: ...\' 或 -b），或直接粘贴 Cookie 头内容',
+      });
+    }
+
+    const mobileHint = String(body.mobile || '').trim();
+    if (mobileHint && !/^1\d{10}$/.test(mobileHint)) {
+      return res.status(400).json({
+        ok: false,
+        message: '手机号格式不正确（选填；若填写须为 11 位）',
+      });
+    }
+
+    const session = createSession();
+    const svc = new LoginService(session);
+    // 手机号选填：无则用占位拉资料；解析不到就留空入库
+    const bootstrapMobile = mobileHint || parsed.mobile || '00000000000';
+    const result = await svc.importCookies(bootstrapMobile, parsed.cookies, {
+      headers: parsed.headers,
+    });
+
+    const resolvedMobile = resolveImportedMobile({
+      hint: mobileHint || parsed.mobile,
+      cookies: parsed.cookies,
+      user: result.user,
+    });
+
+    const saved = await accountRepo.upsertAccount({
+      ...result.user,
+      mobile: resolvedMobile, // 可为 null，留空
+      targetCount,
+      buyerNickname,
+    });
+
+    res.json({
+      ok: true,
+      message: resolvedMobile
+        ? 'Curl 导入成功，账号已写入数据库'
+        : 'Curl 导入成功（手机号未识别，已留空）',
+      cookieCount: parsed.cookieCount,
+      account: accountRepo.toPublicAccount(saved),
+    });
+  } catch (e) {
+    console.error('[login] curl import failed:', e.message || e);
+    res.status(400).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+/** 从抓包 / 资料里解析入库用手机号 */
+function resolveImportedMobile({ hint, cookies, user }) {
+  const tryPhone = (v) => {
+    const m = String(v || '').match(/(1\d{10})/);
+    return m ? m[1] : null;
+  };
+  if (hint && /^1\d{10}$/.test(hint)) return hint;
+  const fromHint = tryPhone(hint);
+  if (fromHint) return fromHint;
+  if (user && user.mobile && /^1\d{10}$/.test(String(user.mobile))) {
+    return String(user.mobile);
+  }
+  // 占位号不算有效手机号
+  if (user && user.mobile && String(user.mobile) === '00000000000') {
+    // fall through
+  } else {
+    const fromUserMobile = tryPhone(user && user.mobile);
+    if (fromUserMobile) return fromUserMobile;
+  }
+  const fromUser = tryPhone(user && user.actAccount);
+  if (fromUser) return fromUser;
+  const selfRaw = user && user.selfRaw;
+  if (selfRaw) {
+    const result = selfRaw.result || selfRaw.data || selfRaw;
+    for (const key of ['mobile', 'phone', 'account', 'loginName', 'ursAccount', 'actAccount']) {
+      const hit = tryPhone(result && result[key]);
+      if (hit) return hit;
+    }
+    const blobHit = tryPhone(JSON.stringify(result || {}));
+    if (blobHit) return blobHit;
+  }
+  if (cookies && typeof cookies === 'object') {
+    for (const key of ['P_INFO', 'S_INFO', 'THE_LAST_LOGIN_MOBILE', 'NTES_SESS_USER']) {
+      const hit = tryPhone(cookies[key]);
+      if (hit) return hit;
+    }
+    for (const v of Object.values(cookies)) {
+      const hit = tryPhone(v);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+/** 仅预览解析结果，不入库 */
+app.post('/api/login/curl/preview', async (req, res) => {
+  try {
+    const raw = String((req.body && (req.body.curl || req.body.raw || req.body.text)) || '').trim();
+    if (!raw) {
+      return res.status(400).json({ ok: false, message: '请粘贴 curl 或 Cookie 原文' });
+    }
+    const parsed = parseCurlOrCookies(raw);
+    const names = Object.keys(parsed.cookies);
+    res.json({
+      ok: true,
+      cookieCount: parsed.cookieCount,
+      mobile: parsed.mobile,
+      cookieNames: names.slice(0, 40),
+      hasGodUuid: !!(parsed.cookies.GOD_UUID || (parsed.headers && parsed.headers['gl-uid'])),
+      hasPlutus: !!(
+        parsed.cookies.NTES_plutus_online_front ||
+        parsed.cookies.NTES_plutus_p_info_online
+      ),
+      hasUrs: !!(parsed.cookies.NTES_YD_SESS || parsed.cookies.NTES_SESS || parsed.cookies.P_INFO),
+    });
   } catch (e) {
     res.status(400).json({ ok: false, message: e.message || String(e) });
   }

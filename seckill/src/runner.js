@@ -19,6 +19,7 @@ const {
   findSamePeriod,
   fetchShowingList,
   fetchXyUserInfo,
+  parseCurrentLv,
   resolveMaxVipLevel,
   acquire,
   syncServerTime,
@@ -326,10 +327,11 @@ async function warmupSession(account, { label = '预热' } = {}) {
   }
 
   const listResult = listResp.result || listResp.data || listResp;
+  const fromApiLv = parseCurrentLv(vipData);
   const maxVipLevel = resolveMaxVipLevel(
     vipData,
     listResult,
-    account.maxVipLevel || (user && user.maxVipLevel) || (user && user.vipLevel) || 'V1'
+    account.maxVipLevel || (user && user.maxVipLevel) || (user && user.vipLevel) || null
   );
   account.maxVipLevel = maxVipLevel;
   // 指定抢购等级（多等级并行）；否则用最大档
@@ -342,10 +344,18 @@ async function warmupSession(account, { label = '预热' } = {}) {
     // 不覆盖 user 主档；抢购用 account.vipLevel
   }
 
+  // 仅当 get-info 真正返回 currentLv 时才写回等级，避免 825/失败把 V5 覆盖成 V1
   await persistCookies(user || { mobile: account.mobile }, jar, tag, {
-    vipLevel: maxVipLevel,
-    vipRaw: vipData,
+    ...(fromApiLv ? { vipLevel: maxVipLevel, vipRaw: vipData } : {}),
   });
+
+  if (!fromApiLv) {
+    console.warn(
+      `${tag}${label} get-info 未返回 currentLv（code=${
+        vipData && vipData.code
+      }），沿用库内/任务档位 ${maxVipLevel}，不覆盖数据库等级`
+    );
+  }
 
   console.log(
     `${tag}${label}账号最大档位=${maxVipLevel}；本任务抢购档=${seckillLevel}${

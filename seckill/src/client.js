@@ -436,7 +436,10 @@ async function fetchXyUserInfo(client) {
 
 function parseCurrentLv(vipData) {
   if (!vipData || typeof vipData !== 'object') return null;
-  const result = vipData.result || vipData.data || vipData;
+  const code = vipData.code != null ? Number(vipData.code) : NaN;
+  if (Number.isFinite(code) && code !== 200 && code !== 0) return null;
+  const result = vipData.result || vipData.data || null;
+  if (!result || typeof result !== 'object') return null;
   const raw =
     result.currentLv ||
     result.maxLv ||

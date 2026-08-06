@@ -31,13 +31,15 @@
       padding: 20px 16px;
     }
     .panel {
-      width: min(440px, 100%);
+      width: min(520px, 100%);
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: 18px;
       padding: 28px 22px;
       box-shadow: 0 12px 40px rgba(31, 42, 55, 0.08);
+      transition: width 0.2s ease;
     }
+    .panel.wide { width: min(720px, 100%); }
     .brand {
       display: inline-flex;
       align-items: center;
@@ -52,6 +54,31 @@
     }
     h1 { margin: 0 0 10px; font-size: 1.55rem; letter-spacing: 0.01em; }
     p { color: var(--muted); line-height: 1.65; margin: 0 0 18px; font-size: 0.95rem; }
+    .tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 18px;
+      padding: 4px;
+      background: #f2f4f7;
+      border-radius: 12px;
+    }
+    .tabs button {
+      flex: 1;
+      width: auto;
+      min-height: 40px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: var(--muted);
+      background: transparent;
+      box-shadow: none;
+    }
+    .tabs button.active {
+      color: var(--text);
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(16, 24, 40, 0.08);
+    }
     label {
       display: block;
       font-size: 0.9rem;
@@ -60,7 +87,9 @@
     }
     .field { margin-bottom: 18px; }
     input[type="number"],
-    input[type="text"] {
+    input[type="text"],
+    input[type="tel"],
+    textarea {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -69,9 +98,17 @@
       color: var(--text);
       outline: none;
       background: #fff;
+      font-family: inherit;
     }
-    input[type="number"]:focus,
-    input[type="text"]:focus {
+    textarea {
+      min-height: 180px;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      font-family: ui-monospace, "SF Mono", Consolas, monospace;
+      resize: vertical;
+    }
+    input:focus,
+    textarea:focus {
       border-color: #f5a09a;
       box-shadow: 0 0 0 3px rgba(230, 0, 18, 0.12);
     }
@@ -81,7 +118,8 @@
       color: var(--muted);
       line-height: 1.45;
     }
-    button {
+    .actions { display: flex; flex-direction: column; gap: 10px; }
+    button.primary {
       width: 100%;
       border: 0;
       border-radius: 12px;
@@ -93,9 +131,22 @@
       cursor: pointer;
       min-height: 52px;
     }
+    button.ghost {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text);
+      background: #fff;
+      cursor: pointer;
+      min-height: 44px;
+    }
     button:disabled { opacity: 0.65; cursor: wait; }
-    .hint { margin-top: 14px; font-size: 0.9rem; color: var(--muted); word-break: break-all; }
+    .hint { margin-top: 14px; font-size: 0.9rem; color: var(--muted); word-break: break-all; white-space: pre-wrap; }
     .err { color: #d92d20; }
+    .ok { color: var(--ok); }
     .nav {
       margin-top: 16px;
       text-align: center;
@@ -107,52 +158,126 @@
       font-weight: 600;
     }
     .nav a:hover { text-decoration: underline; }
+    .mode { display: none; }
+    .mode.active { display: block; }
+    .preview {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #f9fafb;
+      border: 1px solid var(--line);
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.5;
+      display: none;
+    }
+    .preview.show { display: block; }
   </style>
 </head>
 <body>
-  <div class="panel">
+  <div class="panel" id="panel">
     <div class="brand">福利金账号</div>
     <h1>登录网易账号</h1>
-    <p>先填写买家昵称与抢购次数，再开始登录。成功次数达到设定值后，该账号对应等级将不再参与抢购。</p>
-    <div class="field">
-      <label for="buyerNickname">买家昵称</label>
-      <input id="buyerNickname" type="text" maxlength="128" placeholder="例如：张三店铺" />
-      <div class="field-hint">选填，用于管理识别；旧账号默认为空，可在管理页修改。</div>
+    <p id="desc">先填写买家昵称与抢购次数，再开始登录。成功次数达到设定值后，该账号对应等级将不再参与抢购。</p>
+
+    <div class="tabs" role="tablist">
+      <button type="button" class="active" data-mode="online" id="tabOnline">在线登录</button>
+      <button type="button" data-mode="curl" id="tabCurl">Curl 导入</button>
     </div>
-    <div class="field">
-      <label for="targetCount">抢购次数 <span style="color:var(--accent)">*</span></label>
-      <input id="targetCount" type="number" min="1" max="9999" step="1" required placeholder="例如 1" />
-      <div class="field-hint">必填，整数，至少为 1。旧账号未填写时默认为 1 次。</div>
+
+    <div class="mode active" id="modeOnline">
+      <div class="field">
+        <label for="buyerNickname">买家昵称</label>
+        <input id="buyerNickname" type="text" maxlength="128" placeholder="例如：张三店铺" />
+        <div class="field-hint">选填，用于管理识别；旧账号默认为空，可在管理页修改。</div>
+      </div>
+      <div class="field">
+        <label for="targetCount">抢购次数 <span style="color:var(--accent)">*</span></label>
+        <input id="targetCount" type="number" min="1" max="9999" step="1" required placeholder="例如 1" />
+        <div class="field-hint">必填，整数，至少为 1。旧账号未填写时默认为 1 次。</div>
+      </div>
+      <button class="primary" id="btn" type="button">开始登录</button>
     </div>
-    <button id="btn" type="button">开始登录</button>
+
+    <div class="mode" id="modeCurl">
+      <div class="field">
+        <label for="curlBuyer">买家昵称</label>
+        <input id="curlBuyer" type="text" maxlength="128" placeholder="例如：张三店铺" />
+      </div>
+      <div class="field">
+        <label for="curlTarget">抢购次数 <span style="color:var(--accent)">*</span></label>
+        <input id="curlTarget" type="number" min="1" max="9999" step="1" required placeholder="例如 1" />
+      </div>
+      <div class="field">
+        <label for="curlMobile">手机号（选填）</label>
+        <input id="curlMobile" type="tel" maxlength="11" placeholder="可不填；解析不到则留空" />
+        <div class="field-hint">选填。能识别就写入，识别不到保持留空，不影响导入。</div>
+      </div>
+      <div class="field">
+        <label for="curlText">Curl / Cookie 原文 <span style="color:var(--accent)">*</span></label>
+        <textarea id="curlText" placeholder="粘贴其他设备抓包的 curl（含 Cookie），或直接粘贴 Cookie: a=1; b=2; ..."></textarea>
+        <div class="field-hint">支持 Chrome「复制为 cURL」、Charles、Fiddler；也可只贴 Cookie 头。可一次贴多段，Cookie 会合并。</div>
+        <div class="preview" id="curlPreview"></div>
+      </div>
+      <div class="actions">
+        <button class="ghost" id="btnPreview" type="button">预览解析</button>
+        <button class="primary" id="btnImport" type="button">导入并入库</button>
+      </div>
+    </div>
+
     <div class="hint" id="msg"></div>
     <div class="nav"><a href="/accounts.html">查看 / 管理全部账号</a></div>
   </div>
   <script>
-    const btn = document.getElementById('btn');
+    const panel = document.getElementById('panel');
+    const desc = document.getElementById('desc');
     const msg = document.getElementById('msg');
-    const targetInput = document.getElementById('targetCount');
-    const buyerInput = document.getElementById('buyerNickname');
-    btn.addEventListener('click', async () => {
-      const raw = String(targetInput.value || '').trim();
-      if (!raw) {
-        msg.className = 'hint err';
-        msg.textContent = '请填写抢购次数';
-        targetInput.focus();
-        return;
-      }
-      const targetCount = Number(raw);
-      if (!Number.isFinite(targetCount) || targetCount < 1 || !Number.isInteger(targetCount)) {
-        msg.className = 'hint err';
-        msg.textContent = '抢购次数须为大于等于 1 的整数';
-        targetInput.focus();
-        return;
-      }
-      const buyerNickname = String(buyerInput.value || '').trim();
-      btn.disabled = true;
+    const modeOnline = document.getElementById('modeOnline');
+    const modeCurl = document.getElementById('modeCurl');
+    const curlPreview = document.getElementById('curlPreview');
+
+    const DESCS = {
+      online: '先填写买家昵称与抢购次数，再开始登录。成功次数达到设定值后，该账号对应等级将不再参与抢购。',
+      curl: '在其他设备登录并抓包后，把接口 curl（含登录 Cookie）粘贴到下方，即可导入本系统，无需本机再登录。',
+    };
+
+    function setMode(mode) {
+      const isCurl = mode === 'curl';
+      panel.classList.toggle('wide', isCurl);
+      modeOnline.classList.toggle('active', !isCurl);
+      modeCurl.classList.toggle('active', isCurl);
+      document.getElementById('tabOnline').classList.toggle('active', !isCurl);
+      document.getElementById('tabCurl').classList.toggle('active', isCurl);
+      desc.textContent = DESCS[mode];
       msg.className = 'hint';
-      msg.textContent = '正在创建登录会话…';
+      msg.textContent = '';
+      curlPreview.classList.remove('show');
+    }
+
+    document.querySelectorAll('.tabs button').forEach((btn) => {
+      btn.addEventListener('click', () => setMode(btn.dataset.mode));
+    });
+
+    function readTarget(input) {
+      const raw = String(input.value || '').trim();
+      if (!raw) throw new Error('请填写抢购次数');
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+        throw new Error('抢购次数须为大于等于 1 的整数');
+      }
+      return n;
+    }
+
+    document.getElementById('btn').addEventListener('click', async () => {
+      const btn = document.getElementById('btn');
+      const targetInput = document.getElementById('targetCount');
+      const buyerInput = document.getElementById('buyerNickname');
       try {
+        const targetCount = readTarget(targetInput);
+        const buyerNickname = String(buyerInput.value || '').trim();
+        btn.disabled = true;
+        msg.className = 'hint';
+        msg.textContent = '正在创建登录会话…';
         const res = await fetch('/api/login/session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -165,6 +290,82 @@
         msg.className = 'hint err';
         msg.textContent = e.message || String(e);
         btn.disabled = false;
+      }
+    });
+
+    async function previewCurl() {
+      const curl = String(document.getElementById('curlText').value || '').trim();
+      if (!curl) throw new Error('请粘贴 curl 或 Cookie 原文');
+      const res = await fetch('/api/login/curl/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ curl }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.message || '解析失败');
+      if (data.mobile && !document.getElementById('curlMobile').value) {
+        document.getElementById('curlMobile').value = data.mobile;
+      }
+      curlPreview.classList.add('show');
+      curlPreview.textContent =
+        `解析到 ${data.cookieCount} 个 Cookie` +
+        (data.mobile ? `，识别手机号 ${data.mobile}` : '，手机号待导入时识别') +
+        `\nGOD_UUID=${data.hasGodUuid ? '有' : '无'} · Plutus=${data.hasPlutus ? '有' : '无'} · URS=${data.hasUrs ? '有' : '无'}` +
+        (data.cookieNames && data.cookieNames.length
+          ? `\n示例: ${data.cookieNames.slice(0, 12).join(', ')}`
+          : '');
+      return data;
+    }
+
+    document.getElementById('btnPreview').addEventListener('click', async () => {
+      try {
+        msg.className = 'hint';
+        msg.textContent = '';
+        await previewCurl();
+      } catch (e) {
+        curlPreview.classList.remove('show');
+        msg.className = 'hint err';
+        msg.textContent = e.message || String(e);
+      }
+    });
+
+    document.getElementById('btnImport').addEventListener('click', async () => {
+      const btn = document.getElementById('btnImport');
+      try {
+        const targetCount = readTarget(document.getElementById('curlTarget'));
+        const buyerNickname = String(document.getElementById('curlBuyer').value || '').trim();
+        const mobile = String(document.getElementById('curlMobile').value || '').trim();
+        if (mobile && !/^1\d{10}$/.test(mobile)) {
+          throw new Error('手机号格式不正确（选填；若填写须为 11 位）');
+        }
+        const curl = String(document.getElementById('curlText').value || '').trim();
+        if (!curl) throw new Error('请粘贴 curl 或 Cookie 原文');
+        btn.disabled = true;
+        document.getElementById('btnPreview').disabled = true;
+        msg.className = 'hint';
+        msg.textContent = '正在解析并校验登录态…';
+        const payload = { curl, targetCount, buyerNickname };
+        if (mobile) payload.mobile = mobile;
+        const res = await fetch('/api/login/curl', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.message || '导入失败');
+        const a = data.account || {};
+        msg.className = 'hint ok';
+        msg.textContent =
+          `导入成功：${a.mobile || '（手机号留空）'}` +
+          (a.actAccount ? ` / ${a.actAccount}` : '') +
+          (a.vipLevel ? ` / ${a.vipLevel}` : '') +
+          `（Cookie ${data.cookieCount || '?'} 个）\n可前往账号管理查看。`;
+      } catch (e) {
+        msg.className = 'hint err';
+        msg.textContent = e.message || String(e);
+      } finally {
+        btn.disabled = false;
+        document.getElementById('btnPreview').disabled = false;
       }
     });
   </script>

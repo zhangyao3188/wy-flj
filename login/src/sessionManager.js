@@ -730,6 +730,7 @@ class RemoteLoginSession {
       vipLevel: normalizeVipLevel(
         vipResult.currentLv || vipResult.level || vipResult.vipLevel || 'V1'
       ),
+      vipLevelTrusted: !!(vipResult.currentLv || vipResult.level || vipResult.vipLevel),
       uid: selfResult.uid || selfResult.userId || null,
       godUuid: readJar('GOD_UUID'),
       deviceId: session.deviceId,

@@ -86,6 +86,7 @@ function rowToUser(row) {
 }
 
 async function listLevelsByMobile(mobile) {
+  if (mobile == null || String(mobile).trim() === '') return [];
   const rows = await db.query(
     `SELECT * FROM account_seckill_levels WHERE mobile = ? ORDER BY vip_level ASC`,
     [String(mobile)]
@@ -93,10 +94,25 @@ async function listLevelsByMobile(mobile) {
   return rows.map(rowToLevel).sort((a, b) => levelRank(a.vipLevel) - levelRank(b.vipLevel));
 }
 
+async function listLevelsByAccountId(accountId) {
+  const rows = await db.query(
+    `SELECT * FROM account_seckill_levels WHERE account_id = ? ORDER BY vip_level ASC`,
+    [Number(accountId)]
+  );
+  return rows.map(rowToLevel).sort((a, b) => levelRank(a.vipLevel) - levelRank(b.vipLevel));
+}
+
 async function attachLevels(user) {
   if (!user) return null;
   try {
-    user.levels = await listLevelsByMobile(user.mobile);
+    let levels = [];
+    if (user.id) levels = await listLevelsByAccountId(user.id);
+    if (!levels.length && user.mobile) levels = await listLevelsByMobile(user.mobile);
+    // 无手机号时等级表可能用 #id 占位
+    if (!levels.length && user.id) {
+      levels = await listLevelsByMobile(`#${user.id}`);
+    }
+    user.levels = levels;
   } catch (e) {
     user.levels = [];
   }
@@ -117,62 +133,203 @@ async function attachLevels(user) {
 }
 
 async function upsertAccount(user) {
-  const mobile = String(user.mobile);
+  await ensureMobileNullable();
+  const rawMobile =
+    user.mobile != null && String(user.mobile).trim() && String(user.mobile).trim() !== '00000000000'
+      ? String(user.mobile).trim()
+      : null;
+  // 仅写入合法手机号；解析不到则留空（NULL）
+  const mobileValue = rawMobile && /^1\d{10}$/.test(rawMobile) ? rawMobile : null;
+
   const targetCount = normalizeTargetCount(user.targetCount);
-  const vipLevel = normalizeVipLevel(user.vipLevel) || 'V1';
+  const vipTrusted = user.vipLevelTrusted === true;
+  const vipLevel = vipTrusted
+    ? normalizeVipLevel(user.vipLevel) || 'V1'
+    : normalizeVipLevel(user.vipLevel) || 'V1';
   const buyerNickname = normalizeBuyerNickname(user.buyerNickname);
   const actAccount =
     user.actAccount != null && String(user.actAccount).trim()
       ? String(user.actAccount).trim().slice(0, 128)
       : null;
-  const sql = `
-    INSERT INTO accounts (
-      mobile, nickname, buyer_nickname, act_account, vip_level, uid, god_uuid, device_id,
-      cookies_json, cookie_header, vip_raw, self_raw, status, target_count, logged_in_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    ON DUPLICATE KEY UPDATE
-      nickname = VALUES(nickname),
-      buyer_nickname = COALESCE(VALUES(buyer_nickname), buyer_nickname),
-      act_account = COALESCE(VALUES(act_account), act_account),
-      vip_level = VALUES(vip_level),
-      uid = VALUES(uid),
-      god_uuid = VALUES(god_uuid),
-      device_id = VALUES(device_id),
-      cookies_json = VALUES(cookies_json),
-      cookie_header = VALUES(cookie_header),
-      vip_raw = VALUES(vip_raw),
-      self_raw = VALUES(self_raw),
-      status = 1,
-      target_count = VALUES(target_count),
-      logged_in_at = VALUES(logged_in_at)
-  `;
-  await db.query(sql, [
-    mobile,
-    user.nickname || null,
+
+  const payload = {
+    nickname: user.nickname || null,
     buyerNickname,
     actAccount,
     vipLevel,
-    user.uid || null,
-    user.godUuid || null,
-    user.deviceId || null,
-    JSON.stringify(user.cookies || []),
-    user.cookieHeader || null,
-    user.vipRaw ? JSON.stringify(user.vipRaw) : null,
-    user.selfRaw ? JSON.stringify(user.selfRaw) : null,
+    vipTrusted,
+    uid: user.uid || null,
+    godUuid: user.godUuid || null,
+    deviceId: user.deviceId || null,
+    cookiesJson: JSON.stringify(user.cookies || []),
+    cookieHeader: user.cookieHeader || null,
+    vipRaw: user.vipRaw ? JSON.stringify(user.vipRaw) : null,
+    selfRaw: user.selfRaw ? JSON.stringify(user.selfRaw) : null,
     targetCount,
-    user.loggedInAt ? new Date(user.loggedInAt) : new Date(),
-  ]);
-  const saved = await findByMobileRaw(mobile);
+    loggedInAt: user.loggedInAt ? new Date(user.loggedInAt) : new Date(),
+  };
+
+  let saved = null;
+  if (mobileValue) {
+    const sql = `
+      INSERT INTO accounts (
+        mobile, nickname, buyer_nickname, act_account, vip_level, uid, god_uuid, device_id,
+        cookies_json, cookie_header, vip_raw, self_raw, status, target_count, logged_in_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        nickname = VALUES(nickname),
+        buyer_nickname = COALESCE(VALUES(buyer_nickname), buyer_nickname),
+        act_account = COALESCE(VALUES(act_account), act_account),
+        vip_level = IF(?, VALUES(vip_level), vip_level),
+        uid = VALUES(uid),
+        god_uuid = VALUES(god_uuid),
+        device_id = VALUES(device_id),
+        cookies_json = VALUES(cookies_json),
+        cookie_header = VALUES(cookie_header),
+        vip_raw = IF(?, VALUES(vip_raw), vip_raw),
+        self_raw = VALUES(self_raw),
+        status = 1,
+        target_count = VALUES(target_count),
+        logged_in_at = VALUES(logged_in_at)
+    `;
+    await db.query(sql, [
+      mobileValue,
+      payload.nickname,
+      payload.buyerNickname,
+      payload.actAccount,
+      payload.vipLevel,
+      payload.uid,
+      payload.godUuid,
+      payload.deviceId,
+      payload.cookiesJson,
+      payload.cookieHeader,
+      payload.vipRaw,
+      payload.selfRaw,
+      payload.targetCount,
+      payload.loggedInAt,
+      payload.vipTrusted ? 1 : 0,
+      payload.vipTrusted ? 1 : 0,
+    ]);
+    saved = await findByMobileRaw(mobileValue);
+  } else {
+    // 手机号留空：按 god_uuid / uid 更新已有行，否则新建（mobile=NULL）
+    let existing = null;
+    if (payload.godUuid) {
+      const rows = await db.query(
+        'SELECT * FROM accounts WHERE god_uuid = ? ORDER BY id DESC LIMIT 1',
+        [payload.godUuid]
+      );
+      existing = rows[0] || null;
+    }
+    if (!existing && payload.uid) {
+      const rows = await db.query(
+        'SELECT * FROM accounts WHERE uid = ? ORDER BY id DESC LIMIT 1',
+        [payload.uid]
+      );
+      existing = rows[0] || null;
+    }
+    if (existing) {
+      await db.query(
+        `UPDATE accounts SET
+          nickname = ?,
+          buyer_nickname = COALESCE(?, buyer_nickname),
+          act_account = COALESCE(?, act_account),
+          vip_level = IF(?, ?, vip_level),
+          uid = COALESCE(?, uid),
+          god_uuid = COALESCE(?, god_uuid),
+          device_id = COALESCE(?, device_id),
+          cookies_json = ?,
+          cookie_header = ?,
+          vip_raw = IF(?, ?, vip_raw),
+          self_raw = ?,
+          status = 1,
+          target_count = ?,
+          logged_in_at = ?
+        WHERE id = ?`,
+        [
+          payload.nickname,
+          payload.buyerNickname,
+          payload.actAccount,
+          payload.vipTrusted ? 1 : 0,
+          payload.vipLevel,
+          payload.uid,
+          payload.godUuid,
+          payload.deviceId,
+          payload.cookiesJson,
+          payload.cookieHeader,
+          payload.vipTrusted ? 1 : 0,
+          payload.vipRaw,
+          payload.selfRaw,
+          payload.targetCount,
+          payload.loggedInAt,
+          existing.id,
+        ]
+      );
+      saved = await findByIdRaw(existing.id);
+    } else {
+      await db.query(
+        `INSERT INTO accounts (
+          mobile, nickname, buyer_nickname, act_account, vip_level, uid, god_uuid, device_id,
+          cookies_json, cookie_header, vip_raw, self_raw, status, target_count, logged_in_at
+        ) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+        [
+          payload.nickname,
+          payload.buyerNickname,
+          payload.actAccount,
+          payload.vipLevel,
+          payload.uid,
+          payload.godUuid,
+          payload.deviceId,
+          payload.cookiesJson,
+          payload.cookieHeader,
+          payload.vipRaw,
+          payload.selfRaw,
+          payload.targetCount,
+          payload.loggedInAt,
+        ]
+      );
+      if (payload.godUuid) {
+        const rows = await db.query(
+          'SELECT * FROM accounts WHERE god_uuid = ? ORDER BY id DESC LIMIT 1',
+          [payload.godUuid]
+        );
+        saved = rowToUser(rows[0]);
+      } else if (payload.uid) {
+        const rows = await db.query(
+          'SELECT * FROM accounts WHERE uid = ? ORDER BY id DESC LIMIT 1',
+          [payload.uid]
+        );
+        saved = rowToUser(rows[0]);
+      }
+    }
+  }
+
   if (saved) {
-    await ensureSeckillLevel({
-      accountId: saved.id,
-      mobile: saved.mobile,
-      vipLevel,
-      targetCount,
-      syncTarget: true,
-    });
+    const levelMobile = levelMobileKey(saved.mobile, saved.id);
+    // 等级不可信时：若已有抢购等级则不写入假 V1；仅新建账号无等级时才建一条
+    const existingLevels = await listLevelsByAccountId(saved.id);
+    if (payload.vipTrusted || !existingLevels.length) {
+      await ensureSeckillLevel({
+        accountId: saved.id,
+        mobile: levelMobile,
+        vipLevel: saved.vipLevel || payload.vipLevel,
+        targetCount,
+        syncTarget: !!payload.vipTrusted,
+      });
+    }
   }
   return attachLevels(saved);
+}
+
+/** 等级表 mobile 非空：无手机号时用 #accountId 占位，保证唯一 */
+function levelMobileKey(mobile, accountId) {
+  if (mobile != null && String(mobile).trim()) return String(mobile).trim();
+  return `#${accountId}`;
+}
+
+async function findByIdRaw(id) {
+  const rows = await db.query('SELECT * FROM accounts WHERE id = ? LIMIT 1', [Number(id)]);
+  return rowToUser(rows[0]);
 }
 
 async function findByMobileRaw(mobile) {
@@ -180,6 +337,19 @@ async function findByMobileRaw(mobile) {
     String(mobile),
   ]);
   return rowToUser(rows[0]);
+}
+
+let mobileNullableEnsured = false;
+async function ensureMobileNullable() {
+  if (mobileNullableEnsured) return;
+  try {
+    await db.query(
+      `ALTER TABLE accounts MODIFY COLUMN mobile VARCHAR(20) NULL COMMENT '手机号（可空，curl 导入解析不到时留空）'`
+    );
+  } catch (e) {
+    // ignore
+  }
+  mobileNullableEnsured = true;
 }
 
 async function ensureSeckillLevel({
