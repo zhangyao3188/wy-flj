@@ -163,7 +163,7 @@ app.post('/api/login/curl', async (req, res) => {
 
     const session = createSession();
     const svc = new LoginService(session);
-    // 手机号选填：无则用占位拉资料；解析不到就留空入库
+    // 手机号选填：无真实号则入库时自动分配 mock-1xxxxxxxxxx
     const bootstrapMobile = mobileHint || parsed.mobile || '00000000000';
     const result = await svc.importCookies(bootstrapMobile, parsed.cookies, {
       headers: parsed.headers,
@@ -177,16 +177,17 @@ app.post('/api/login/curl', async (req, res) => {
 
     const saved = await accountRepo.upsertAccount({
       ...result.user,
-      mobile: resolvedMobile, // 可为 null，留空
+      mobile: resolvedMobile, // null → upsert 内部分配 mock 虚拟号
       targetCount,
       buyerNickname,
     });
 
+    const isMock = accountRepo.isMockMobile(saved.mobile);
     res.json({
       ok: true,
-      message: resolvedMobile
-        ? 'Curl 导入成功，账号已写入数据库'
-        : 'Curl 导入成功（手机号未识别，已留空）',
+      message: isMock
+        ? `Curl 导入成功（无绑定手机号，已分配虚拟号 ${saved.mobile}）`
+        : 'Curl 导入成功，账号已写入数据库',
       cookieCount: parsed.cookieCount,
       account: accountRepo.toPublicAccount(saved),
     });
@@ -281,13 +282,53 @@ app.get('/api/accounts', async (req, res) => {
         vipStats[key] = (vipStats[key] || 0) + 1;
       }
     }
+    const todaySuccessOrders = accounts.reduce(
+      (sum, a) => sum + (Number(a.todaySuccessCount) || 0),
+      0
+    );
+    const todaySuccessAccounts = accounts.filter((a) => (a.todaySuccessCount || 0) > 0).length;
     res.json({
       ok: true,
       total: accounts.length,
       vipStats,
+      todaySuccessOrders,
+      todaySuccessAccounts,
+      today: accountRepo.chinaDayRange().day,
       accounts,
     });
   } catch (e) {
+    res.status(500).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+/** 当日（或指定日）抢购成功订单 */
+app.get('/api/seckill-success', async (req, res) => {
+  try {
+    const day = req.query.day ? String(req.query.day).trim() : null;
+    const data = await accountRepo.listSuccessLogs({ day });
+    res.json({ ok: true, ...data });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+/** 批量验证可用账号在线（actInfo，跳过已全部完成）——须放在 /:id 路由之前 */
+app.post('/api/accounts/check-online', async (_req, res) => {
+  try {
+    console.log('[login] check-online start…');
+    const data = await accountRepo.checkAllAccountsOnline();
+    console.log(
+      `[login] check-online done total=${data.total} online=${data.online} offline=${data.offline} skipped=${data.skipped || 0}`
+    );
+    const skipHint =
+      data.skipped > 0 ? `，跳过已完成 ${data.skipped}` : '';
+    res.json({
+      ok: true,
+      message: `验证完成：在线 ${data.online}，离线 ${data.offline}，共验证 ${data.total}${skipHint}`,
+      ...data,
+    });
+  } catch (e) {
+    console.error('[login] check-online failed:', e.message || e);
     res.status(500).json({ ok: false, message: e.message || String(e) });
   }
 });
@@ -299,6 +340,27 @@ app.get('/api/accounts/:id', async (req, res) => {
     res.json({ ok: true, account: accountRepo.toPublicAccount(user) });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+/** 用库内 Cookie 同步账号等级 / 账户名称等 */
+app.post('/api/accounts/:id/sync', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id < 1) {
+      return res.status(400).json({ ok: false, message: '无效账号 id' });
+    }
+    const fresh = await accountRepo.syncAccountProfile(id);
+    res.json({
+      ok: true,
+      message: `已同步：最大档 ${fresh.vipLevel}${
+        fresh.actAccount ? `，账户 ${fresh.actAccount}` : ''
+      }`,
+      account: accountRepo.toPublicAccount(fresh),
+    });
+  } catch (e) {
+    console.error('[login] sync account failed:', e.message || e);
+    res.status(400).json({ ok: false, message: e.message || String(e) });
   }
 });
 

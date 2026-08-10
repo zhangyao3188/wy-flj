@@ -210,8 +210,8 @@
       </div>
       <div class="field">
         <label for="curlMobile">手机号（选填）</label>
-        <input id="curlMobile" type="tel" maxlength="11" placeholder="可不填；解析不到则留空" />
-        <div class="field-hint">选填。能识别就写入，识别不到保持留空，不影响导入。</div>
+        <input id="curlMobile" type="tel" maxlength="11" placeholder="可不填；无绑定则自动分配虚拟号" />
+        <div class="field-hint">选填。能识别写真实号；识别不到会自动分配 <code>mock-1xxxxxxxxxx</code> 虚拟号。</div>
       </div>
       <div class="field">
         <label for="curlText">Curl / Cookie 原文 <span style="color:var(--accent)">*</span></label>

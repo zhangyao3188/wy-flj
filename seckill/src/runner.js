@@ -490,7 +490,11 @@ async function fireLoop(client, ready, target, options = {}) {
             (user && user.vipLevel) ||
             null;
           accountRepo
-            .incrementSuccessCount(mobile, levelForCount)
+            .incrementSuccessCount(mobile, levelForCount, {
+              accountId: (user && user.id) || options.accountId || null,
+              couponId: ready && ready.couponId,
+              stockId: ready && ready.stockId,
+            })
             .then((n) => {
               successCount = n;
               console.log(`${tag}[seckill] 成功次数已异步写入 successCount=${n}`);
@@ -764,6 +768,8 @@ async function runSeckill(mobile, options = {}) {
     tag: account.mobile,
     jar: account.jar,
     user: account.user,
+    accountId: (account.user && account.user.id) || null,
+    vipLevel: account.vipLevel,
     fireOffsetMs,
     fireOffsetLabel: formatFireOffsetLabel(fireOffsetMs),
     fireBaseAt: baseAt,

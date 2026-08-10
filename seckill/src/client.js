@@ -27,17 +27,26 @@ function getServerOffsetMs() {
   return serverOffsetMs;
 }
 
-function ensureLogDir() {
-  if (!fs.existsSync(LOG_DIR)) {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
+function ensureLogDir(dir = LOG_DIR) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
+/** 本地日历日 YYYYMMDD（如 20260810） */
+function localDayYmd(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}${m}${d}`;
+}
+
 function createLogWriter(mobile) {
-  ensureLogDir();
-  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const day = localDayYmd();
+  const dayDir = path.join(LOG_DIR, day);
+  ensureLogDir(dayDir);
   const safeMobile = String(mobile || 'unknown').replace(/\W/g, '');
-  const filePath = path.join(LOG_DIR, `seckill-${safeMobile}-${day}.log`);
+  const filePath = path.join(dayDir, `seckill-${safeMobile}-${day}.log`);
   /** 串行异步写盘，不阻塞抢购请求链路 */
   let writeChain = Promise.resolve();
   return {

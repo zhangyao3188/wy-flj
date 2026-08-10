@@ -303,6 +303,7 @@ async function runMulti(options = {}) {
           tag: `${account.mobile}/${account.vipLevel}`,
           jar: account.jar,
           user: account.user,
+          accountId: (account.user && account.user.id) || null,
           vipLevel: account.vipLevel,
           fireOffsetMs,
           fireOffsetLabel: formatFireOffsetLabel(fireOffsetMs),

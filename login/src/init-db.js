@@ -36,7 +36,7 @@ async function main() {
   await conn.query(`
 CREATE TABLE IF NOT EXISTS \`accounts\` (
   \`id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  \`mobile\` VARCHAR(20) NULL COMMENT '手机号（可空，curl 导入解析不到时留空）',
+  \`mobile\` VARCHAR(32) NULL COMMENT '手机号；无绑定时为 mock-1xxxxxxxxxx',
   \`nickname\` VARCHAR(128) NULL,
   \`buyer_nickname\` VARCHAR(128) NULL COMMENT '买家昵称（登录/管理页填写）',
   \`act_account\` VARCHAR(128) NULL COMMENT '账户名称 actInfo.actAccount',
@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS \`accounts\` (
   \`status\` TINYINT NOT NULL DEFAULT 1,
   \`success_count\` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '真实抢购成功次数（不含已领取）',
   \`target_count\` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '设定的抢购次数',
+  \`last_success_at\` DATETIME NULL COMMENT '最近一次真实抢购成功时间',
   \`logged_in_at\` DATETIME NULL,
   \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -135,11 +136,11 @@ CREATE TABLE IF NOT EXISTS \`login_sessions\` (
 
   try {
     await conn.query(
-      `ALTER TABLE \`accounts\` MODIFY COLUMN \`mobile\` VARCHAR(20) NULL COMMENT '手机号（可空，curl 导入解析不到时留空）'`
+      `ALTER TABLE \`accounts\` MODIFY COLUMN \`mobile\` VARCHAR(32) NULL COMMENT '手机号；无绑定时为 mock-1xxxxxxxxxx'`
     );
-    console.log('[init-db] accounts.mobile nullable');
+    console.log('[init-db] accounts.mobile varchar(32) / mock-ready');
   } catch (e) {
-    console.warn(`[init-db] mobile nullable: ${e.message}`);
+    console.warn(`[init-db] mobile column: ${e.message}`);
   }
 
   try {
@@ -161,6 +162,7 @@ CREATE TABLE IF NOT EXISTS \`account_seckill_levels\` (
   \`vip_level\` VARCHAR(16) NOT NULL,
   \`target_count\` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '该等级设定抢购次数',
   \`success_count\` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '该等级真实抢购成功次数',
+  \`last_success_at\` DATETIME NULL COMMENT '该等级最近一次真实抢购成功时间',
   \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (\`id\`),
@@ -171,15 +173,57 @@ CREATE TABLE IF NOT EXISTS \`account_seckill_levels\` (
 `);
   console.log('[init-db] ensure account_seckill_levels');
 
+  try {
+    await conn.query(
+      `ALTER TABLE \`accounts\` ADD COLUMN \`last_success_at\` DATETIME NULL COMMENT '最近一次真实抢购成功时间' AFTER \`target_count\``
+    );
+    console.log('[init-db] added accounts.last_success_at');
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      console.warn(`[init-db] accounts.last_success_at: ${e.message}`);
+    }
+  }
+
+  try {
+    await conn.query(
+      `ALTER TABLE \`account_seckill_levels\` ADD COLUMN \`last_success_at\` DATETIME NULL COMMENT '该等级最近一次真实抢购成功时间' AFTER \`success_count\``
+    );
+    console.log('[init-db] added account_seckill_levels.last_success_at');
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      console.warn(`[init-db] levels.last_success_at: ${e.message}`);
+    }
+  }
+
+  await conn.query(`
+CREATE TABLE IF NOT EXISTS \`seckill_success_logs\` (
+  \`id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  \`account_id\` BIGINT UNSIGNED NULL,
+  \`mobile\` VARCHAR(20) NULL,
+  \`vip_level\` VARCHAR(16) NULL,
+  \`coupon_id\` VARCHAR(128) NULL,
+  \`stock_id\` VARCHAR(256) NULL,
+  \`success_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (\`id\`),
+  KEY \`idx_success_at\` (\`success_at\`),
+  KEY \`idx_account_id\` (\`account_id\`),
+  KEY \`idx_mobile\` (\`mobile\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`);
+  console.log('[init-db] ensure seckill_success_logs');
+
   // 旧账号迁移：无等级记录时，用 accounts 主等级 + 次数生成一条
   const [mig] = await conn.query(`
     INSERT INTO account_seckill_levels (account_id, mobile, vip_level, target_count, success_count)
-    SELECT a.id, a.mobile, a.vip_level,
+    SELECT a.id,
+           COALESCE(NULLIF(a.mobile, ''), CONCAT('#', a.id)),
+           a.vip_level,
            COALESCE(NULLIF(a.target_count, 0), 1),
            COALESCE(a.success_count, 0)
     FROM accounts a
     WHERE NOT EXISTS (
-      SELECT 1 FROM account_seckill_levels l WHERE l.mobile = a.mobile
+      SELECT 1 FROM account_seckill_levels l WHERE l.account_id = a.id
     )
   `);
   if (mig && mig.affectedRows) {

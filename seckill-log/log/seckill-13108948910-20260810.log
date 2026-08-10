@@ -1,0 +1,10 @@
+============================================================
+[请求时间] 2026/8/10 11:54:51.601
+[响应时间] 2026/8/10 11:55:06.691
+[耗时] 15090ms
+[请求路径] https://pay-api.ds.163.com/v1/web/init/server/time
+[请求方式] GET
+[请求参数] {"query":null,"body":null}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"e475ff53-70eb-4193-bdf2-01e45a4bf92f","GL-Uid":"0d5d3ccf39274accba703ac5cc56d2bc","GL-X-XSRF-TOKEN":"e0605954-626c-4121-9515-9d5659b9275f","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"error":true,"message":"timeout of 15000ms exceeded","code":"ECONNABORTED"}
+============================================================

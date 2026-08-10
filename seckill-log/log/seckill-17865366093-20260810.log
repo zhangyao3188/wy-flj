@@ -1,0 +1,30 @@
+============================================================
+[请求时间] 2026/8/10 11:54:51.601
+[响应时间] 2026/8/10 11:55:06.691
+[耗时] 15090ms
+[请求路径] https://pay-api.ds.163.com/v1/web/init/server/time
+[请求方式] GET
+[请求参数] {"query":null,"body":null}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"91c3131d-8075-4975-95f1-fc1135ed6f8c","GL-Uid":"f2b1da0e84054821982ac23ac0b7022a","GL-X-XSRF-TOKEN":"d4ca3600-e400-4381-90f8-f54f7e69d37f","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"error":true,"message":"timeout of 15000ms exceeded","code":"ECONNABORTED"}
+============================================================
+============================================================
+[请求时间] 2026/8/10 11:55:06.659
+[响应时间] 2026/8/10 11:55:06.824
+[耗时] 165ms
+[请求路径] https://pay-api.ds.163.com/api/nlogin
+[请求方式] GET
+[请求参数] {"query":{},"body":null}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"d4ca3600-e400-4381-90f8-f54f7e69d37f","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"91c3131d-8075-4975-95f1-fc1135ed6f8c","GL-Uid":"f2b1da0e84054821982ac23ac0b7022a","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":413,"msg":"登录失败"}}
+============================================================
+============================================================
+[请求时间] 2026/8/10 11:55:06.822
+[响应时间] 2026/8/10 11:55:14.014
+[耗时] 7192ms
+[请求路径] https://inf.ds.163.com/v1/web/cooperate/plutus/cookie-exchange
+[请求方式] GET
+[请求参数] {"query":null,"body":null}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"d4ca3600-e400-4381-90f8-f54f7e69d37f","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"91c3131d-8075-4975-95f1-fc1135ed6f8c","GL-Uid":"f2b1da0e84054821982ac23ac0b7022a","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"result":{"user":{"uid":"f2b1da0e84054821982ac23ac0b7022a","nick":"小圆唯","icon":"https://ok.166.net/reunionpub/3_20260315_19cef304a57198256.jpeg","intro":"","gender":2,"updateTime":1773539597451,"userSourceType":"URS"},"newUser":false},"code":200,"errmsg":"OK"}}
+============================================================

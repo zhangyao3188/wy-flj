@@ -674,11 +674,12 @@ class RemoteLoginSession {
       return null;
     }
     if (!mobile) {
-      console.warn('[login] extract no mobile', {
-        accountHint: extractAccountHint(map),
-        selfSnippet: JSON.stringify(selfData || {}).slice(0, 240),
-      });
-      return null;
+      const god = readJar('GOD_UUID');
+      const hint = extractAccountHint(map);
+      mobile = accountRepo.buildMockMobileFromSeed(
+        god || hint || session.deviceId || `extract-${Date.now()}`
+      );
+      console.warn(`[login] 未识别真实手机号，使用虚拟号 ${mobile}`);
     }
 
     const { LoginService, normalizeVipLevel } = require('./loginService');

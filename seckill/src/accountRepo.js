@@ -33,6 +33,7 @@ function rowToLevel(row) {
     successCount,
     targetCount,
     completed: successCount >= targetCount,
+    lastSuccessAt: row.last_success_at || null,
   };
 }
 
@@ -73,6 +74,7 @@ function rowToUser(row) {
     targetCount,
     completed: successCount >= targetCount,
     levelId: row._levelId != null ? row._levelId : null,
+    lastSuccessAt: row.last_success_at || null,
     loggedInAt: row.logged_in_at,
     updatedAt: row.updated_at,
   };
@@ -204,36 +206,120 @@ async function updateVipLevel(mobile, vipLevel, vipRaw = null) {
 }
 
 /**
- * 真实抢购成功 +1（按等级；无等级表则回退账号表）
+ * 真实抢购成功 +1（按等级；无等级表则回退账号表），并写入当日成功日志
+ * @param {string|null} mobile
+ * @param {string|null} vipLevel
+ * @param {{ accountId?: number, couponId?: string, stockId?: string }} [meta]
  */
-async function incrementSuccessCount(mobile, vipLevel = null) {
+async function incrementSuccessCount(mobile, vipLevel = null, meta = {}) {
   await ensureAccountColumns();
   const level = normalizeVipLevel(vipLevel);
+  const now = new Date();
+  let successCount = 0;
+  let accountId = meta.accountId != null ? Number(meta.accountId) : null;
+
   if (level) {
     try {
-      const r = await db.query(
-        `UPDATE account_seckill_levels
-         SET success_count = COALESCE(success_count, 0) + 1
-         WHERE mobile = ? AND vip_level = ?`,
-        [String(mobile), level]
-      );
-      if (r && r.affectedRows) {
-        const rows = await db.query(
-          `SELECT success_count FROM account_seckill_levels WHERE mobile = ? AND vip_level = ? LIMIT 1`,
-          [String(mobile), level]
+      let r = null;
+      if (mobile) {
+        r = await db.query(
+          `UPDATE account_seckill_levels
+           SET success_count = COALESCE(success_count, 0) + 1,
+               last_success_at = ?
+           WHERE mobile = ? AND vip_level = ?`,
+          [now, String(mobile), level]
         );
-        return Number(rows[0] && rows[0].success_count) || 0;
+      }
+      if ((!r || !r.affectedRows) && accountId) {
+        r = await db.query(
+          `UPDATE account_seckill_levels
+           SET success_count = COALESCE(success_count, 0) + 1,
+               last_success_at = ?
+           WHERE account_id = ? AND vip_level = ?`,
+          [now, accountId, level]
+        );
+      }
+      if (r && r.affectedRows) {
+        const rows = mobile
+          ? await db.query(
+              `SELECT success_count, account_id FROM account_seckill_levels WHERE mobile = ? AND vip_level = ? LIMIT 1`,
+              [String(mobile), level]
+            )
+          : await db.query(
+              `SELECT success_count, account_id FROM account_seckill_levels WHERE account_id = ? AND vip_level = ? LIMIT 1`,
+              [accountId, level]
+            );
+        successCount = Number(rows[0] && rows[0].success_count) || 0;
+        if (!accountId && rows[0] && rows[0].account_id) {
+          accountId = Number(rows[0].account_id);
+        }
       }
     } catch (_) {
       // fall through
     }
   }
-  await db.query(
-    'UPDATE accounts SET success_count = COALESCE(success_count, 0) + 1 WHERE mobile = ?',
-    [String(mobile)]
-  );
-  const user = await findByMobile(mobile);
-  return user ? user.successCount : 0;
+
+  if (!successCount) {
+    if (mobile) {
+      await db.query(
+        `UPDATE accounts
+         SET success_count = COALESCE(success_count, 0) + 1,
+             last_success_at = ?
+         WHERE mobile = ?`,
+        [now, String(mobile)]
+      );
+      const user = await findByMobile(mobile);
+      successCount = user ? user.successCount : 0;
+      if (!accountId && user) accountId = user.id;
+    } else if (accountId) {
+      await db.query(
+        `UPDATE accounts
+         SET success_count = COALESCE(success_count, 0) + 1,
+             last_success_at = ?
+         WHERE id = ?`,
+        [now, accountId]
+      );
+      const rows = await db.query(
+        `SELECT success_count FROM accounts WHERE id = ? LIMIT 1`,
+        [accountId]
+      );
+      successCount = Number(rows[0] && rows[0].success_count) || 0;
+    }
+  } else if (mobile || accountId) {
+    // 等级表已 +1 时，同步账号最近成功时间
+    if (mobile) {
+      await db.query(`UPDATE accounts SET last_success_at = ? WHERE mobile = ?`, [
+        now,
+        String(mobile),
+      ]).catch(() => {});
+    }
+    if (accountId) {
+      await db.query(`UPDATE accounts SET last_success_at = ? WHERE id = ?`, [
+        now,
+        accountId,
+      ]).catch(() => {});
+    }
+  }
+
+  try {
+    await db.query(
+      `INSERT INTO seckill_success_logs
+        (account_id, mobile, vip_level, coupon_id, stock_id, success_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        accountId || null,
+        mobile ? String(mobile) : null,
+        level || null,
+        meta.couponId ? String(meta.couponId).slice(0, 128) : null,
+        meta.stockId ? String(meta.stockId).slice(0, 256) : null,
+        now,
+      ]
+    );
+  } catch (e) {
+    console.warn(`[accountRepo] 写入成功日志失败: ${e.message || e}`);
+  }
+
+  return successCount;
 }
 
 let ensuredColumns = false;
@@ -267,6 +353,15 @@ async function ensureAccountColumns() {
     }
   }
   try {
+    await db.query(
+      `ALTER TABLE accounts ADD COLUMN last_success_at DATETIME NULL COMMENT '最近一次真实抢购成功时间' AFTER target_count`
+    );
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      // ignore
+    }
+  }
+  try {
     await db.query(`
 CREATE TABLE IF NOT EXISTS account_seckill_levels (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -275,6 +370,7 @@ CREATE TABLE IF NOT EXISTS account_seckill_levels (
   vip_level VARCHAR(16) NOT NULL,
   target_count INT UNSIGNED NOT NULL DEFAULT 1,
   success_count INT UNSIGNED NOT NULL DEFAULT 0,
+  last_success_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -284,14 +380,42 @@ CREATE TABLE IF NOT EXISTS account_seckill_levels (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
   } catch (_) {}
   try {
+    await db.query(
+      `ALTER TABLE account_seckill_levels ADD COLUMN last_success_at DATETIME NULL COMMENT '该等级最近一次真实抢购成功时间' AFTER success_count`
+    );
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      // ignore
+    }
+  }
+  try {
+    await db.query(`
+CREATE TABLE IF NOT EXISTS seckill_success_logs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  account_id BIGINT UNSIGNED NULL,
+  mobile VARCHAR(20) NULL,
+  vip_level VARCHAR(16) NULL,
+  coupon_id VARCHAR(128) NULL,
+  stock_id VARCHAR(256) NULL,
+  success_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_success_at (success_at),
+  KEY idx_account_id (account_id),
+  KEY idx_mobile (mobile)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+  } catch (_) {}
+  try {
     await db.query(`
       INSERT INTO account_seckill_levels (account_id, mobile, vip_level, target_count, success_count)
-      SELECT a.id, a.mobile, a.vip_level,
+      SELECT a.id,
+             COALESCE(NULLIF(a.mobile, ''), CONCAT('#', a.id)),
+             a.vip_level,
              COALESCE(NULLIF(a.target_count, 0), 1),
              COALESCE(a.success_count, 0)
       FROM accounts a
       WHERE NOT EXISTS (
-        SELECT 1 FROM account_seckill_levels l WHERE l.mobile = a.mobile
+        SELECT 1 FROM account_seckill_levels l WHERE l.account_id = a.id
       )
     `);
   } catch (_) {}

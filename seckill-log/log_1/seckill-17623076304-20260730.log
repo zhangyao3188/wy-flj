@@ -1,0 +1,110 @@
+============================================================
+[请求时间] 2026/7/30 17:59:05.445
+[响应时间] 2026/7/30 17:59:05.610
+[耗时] 165ms
+[请求路径] https://pay-api.ds.163.com/v1/web/init/server/time
+[请求方式] GET
+[请求参数] {"query":null,"body":null}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"f3d24cc5-4a05-422e-9e7c-3aecd805d1e6","GL-Uid":"6e3c7f96e3d04a61b5bccb013be0b66e","GL-X-XSRF-TOKEN":"284204f3-51c5-4647-b6ce-20f0f42dcf52","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":404,"data":"<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 3.2 Final//EN\">\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n"}
+============================================================
+============================================================
+[请求时间] 2026/7/30 17:59:05.611
+[响应时间] 2026/7/30 17:59:05.755
+[耗时] 144ms
+[请求路径] https://pay-api.ds.163.com/api/nlogin
+[请求方式] GET
+[请求参数] {"query":{},"body":null}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"284204f3-51c5-4647-b6ce-20f0f42dcf52","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"f3d24cc5-4a05-422e-9e7c-3aecd805d1e6","GL-Uid":"6e3c7f96e3d04a61b5bccb013be0b66e","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":413,"msg":"登录失败"}}
+============================================================
+============================================================
+[请求时间] 2026/7/30 17:59:05.756
+[响应时间] 2026/7/30 17:59:05.916
+[耗时] 160ms
+[请求路径] https://inf.ds.163.com/v1/web/cooperate/plutus/cookie-exchange
+[请求方式] GET
+[请求参数] {"query":null,"body":null}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"284204f3-51c5-4647-b6ce-20f0f42dcf52","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"f3d24cc5-4a05-422e-9e7c-3aecd805d1e6","GL-Uid":"6e3c7f96e3d04a61b5bccb013be0b66e","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"result":{"user":{"uid":"6e3c7f96e3d04a61b5bccb013be0b66e","nick":"游戏玩家627789598","icon":"","intro":"","gender":1,"updateTime":1784619145008,"userSourceType":"URS"},"newUser":false},"code":200,"errmsg":"OK"}}
+============================================================
+============================================================
+[请求时间] 2026/7/30 17:59:05.916
+[响应时间] 2026/7/30 17:59:06.054
+[耗时] 138ms
+[请求路径] https://pay-api.ds.163.com/v1/web/init/server/time
+[请求方式] GET
+[请求参数] {"query":null,"body":null}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"284204f3-51c5-4647-b6ce-20f0f42dcf52","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"f3d24cc5-4a05-422e-9e7c-3aecd805d1e6","GL-Uid":"6e3c7f96e3d04a61b5bccb013be0b66e","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":404,"data":"<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 3.2 Final//EN\">\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n"}
+============================================================
+============================================================
+[请求时间] 2026/7/30 17:59:06.055
+[响应时间] 2026/7/30 17:59:06.213
+[耗时] 158ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/xy/user/get-info
+[请求方式] POST
+[请求参数] {"query":null,"body":{}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"284204f3-51c5-4647-b6ce-20f0f42dcf52","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"f3d24cc5-4a05-422e-9e7c-3aecd805d1e6","GL-Uid":"6e3c7f96e3d04a61b5bccb013be0b66e","GL-CheckSum":"4f3e5ef06a5a57225e9242dad0e412b77d18c968","Content-Length":"2","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"result":{"growthPoint":0,"currentLv":"V1","diffNextLvGrowthPoint":2000,"nextLv":"V2","systemAssigned":true},"code":200,"errmsg":"OK"}}
+============================================================
+============================================================
+[请求时间] 2026/7/30 17:59:06.214
+[响应时间] 2026/7/30 17:59:06.280
+[耗时] 66ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/showing-list-v2
+[请求方式] POST
+[请求参数] {"query":null,"body":{}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"284204f3-51c5-4647-b6ce-20f0f42dcf52","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"f3d24cc5-4a05-422e-9e7c-3aecd805d1e6","GL-Uid":"6e3c7f96e3d04a61b5bccb013be0b66e","GL-CheckSum":"4f3e5ef06a5a57225e9242dad0e412b77d18c968","Content-Length":"2","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"result":{"coupons":[{"couponId":"687076e69f3efd24cb2bed9c","name":"V1","amount":1,"xyLevel":"V1","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING","acquiredStatus":"OUT_OF_STOCK","stockId":"687076e69f3efd24cb2bed9c_WEEKLY_1785297600000","stockRemain":0},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"68708657f56f912f57e063bf","name":"V2","amount":2,"xyLevel":"V2","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"6870867989fddd2bbdec96bc","name":"V3","amount":3,"xyLevel":"V3","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"6870869cf56f912f57e063c0","name":"V4","amount":8,"xyLevel":"V4","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"687086e33d0d02335c1804f4","name":"V5","amount":18,"xyLevel":"V5","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"68708705f56f912f57e063c3","name":"V6","amount":30,"xyLevel":"V6","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"6870872e89fddd2bbdec96bd","name":"V7","amount":75,"xyLevel":"V7","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]}]},"code":200,"errmsg":"OK"}}
+============================================================
+============================================================
+[请求时间] 2026/7/30 17:59:06.614
+[响应时间] 2026/7/30 17:59:06.679
+[耗时] 65ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/showing-list-v2
+[请求方式] POST
+[请求参数] {"query":null,"body":{}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"284204f3-51c5-4647-b6ce-20f0f42dcf52","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"f3d24cc5-4a05-422e-9e7c-3aecd805d1e6","GL-Uid":"6e3c7f96e3d04a61b5bccb013be0b66e","GL-CheckSum":"4f3e5ef06a5a57225e9242dad0e412b77d18c968","Content-Length":"2","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"result":{"coupons":[{"couponId":"687076e69f3efd24cb2bed9c","name":"V1","amount":1,"xyLevel":"V1","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING","acquiredStatus":"OUT_OF_STOCK","stockId":"687076e69f3efd24cb2bed9c_WEEKLY_1785297600000","stockRemain":0},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"68708657f56f912f57e063bf","name":"V2","amount":2,"xyLevel":"V2","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"6870867989fddd2bbdec96bc","name":"V3","amount":3,"xyLevel":"V3","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"6870869cf56f912f57e063c0","name":"V4","amount":8,"xyLevel":"V4","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"687086e33d0d02335c1804f4","name":"V5","amount":18,"xyLevel":"V5","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"68708705f56f912f57e063c3","name":"V6","amount":30,"xyLevel":"V6","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]},{"couponId":"6870872e89fddd2bbdec96bd","name":"V7","amount":75,"xyLevel":"V7","seckillTime":"WEEKLY","periods":[{"weekDay":1,"seckillStartTime":1785124800000,"seckillEndTime":1785297599999,"status":"ENDED"},{"weekDay":3,"seckillStartTime":1785297600000,"seckillEndTime":1785470399999,"status":"PROGRESSING"},{"weekDay":5,"seckillStartTime":1785470400000,"seckillEndTime":1785729599999,"status":"NOT_STARTED"},{"weekDay":1,"seckillStartTime":1785729600000,"seckillEndTime":1785902399999,"status":"NOT_STARTED"},{"weekDay":3,"seckillStartTime":1785902400000,"seckillEndTime":1786075199999,"status":"NOT_STARTED"},{"weekDay":5,"seckillStartTime":1786075200000,"seckillEndTime":1785124799999,"status":"NOT_STARTED"}]}]},"code":200,"errmsg":"OK"}}
+============================================================
+============================================================
+[请求时间] 2026/7/30 17:59:06.679
+[响应时间] 2026/7/30 17:59:06.814
+[耗时] 135ms
+[请求路径] https://pay-api.ds.163.com/v1/web/init/server/time
+[请求方式] GET
+[请求参数] {"query":null,"body":null}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"284204f3-51c5-4647-b6ce-20f0f42dcf52","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"f3d24cc5-4a05-422e-9e7c-3aecd805d1e6","GL-Uid":"6e3c7f96e3d04a61b5bccb013be0b66e","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":404,"data":"<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 3.2 Final//EN\">\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n"}
+============================================================
+============================================================
+[请求时间] 2026/7/30 17:59:06.815
+[响应时间] 2026/7/30 17:59:06.956
+[耗时] 141ms
+[请求路径] https://pay-api.ds.163.com/api/nlogin
+[请求方式] GET
+[请求参数] {"query":{},"body":null}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"284204f3-51c5-4647-b6ce-20f0f42dcf52","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"f3d24cc5-4a05-422e-9e7c-3aecd805d1e6","GL-Uid":"6e3c7f96e3d04a61b5bccb013be0b66e","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":413,"msg":"登录失败"}}
+============================================================
+============================================================
+[请求时间] 2026/7/30 17:59:12.490
+[响应时间] 2026/7/30 17:59:12.567
+[耗时] 77ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"687076e69f3efd24cb2bed9c","stockId":"687076e69f3efd24cb2bed9c_WEEKLY_1785297600000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"284204f3-51c5-4647-b6ce-20f0f42dcf52","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"f3d24cc5-4a05-422e-9e7c-3aecd805d1e6","GL-Uid":"6e3c7f96e3d04a61b5bccb013be0b66e","GL-CheckSum":"1e246bf9d01a0fcf0dd33ff611ea5073fe417c84","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":40008,"errmsg":"当前库存已不足，敬请参与下期活动噢"}}
+============================================================
+============================================================
+[请求时间] 2026/7/30 17:59:13.577
+[响应时间] 2026/7/30 17:59:13.632
+[耗时] 55ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"687076e69f3efd24cb2bed9c","stockId":"687076e69f3efd24cb2bed9c_WEEKLY_1785297600000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"284204f3-51c5-4647-b6ce-20f0f42dcf52","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"f3d24cc5-4a05-422e-9e7c-3aecd805d1e6","GL-Uid":"6e3c7f96e3d04a61b5bccb013be0b66e","GL-CheckSum":"1e246bf9d01a0fcf0dd33ff611ea5073fe417c84","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":40008,"errmsg":"当前库存已不足，敬请参与下期活动噢"}}
+============================================================
