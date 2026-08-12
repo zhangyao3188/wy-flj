@@ -182,12 +182,25 @@ CREATE TABLE IF NOT EXISTS seckill_success_logs (
   coupon_id VARCHAR(128) NULL,
   stock_id VARCHAR(256) NULL,
   success_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  kind VARCHAR(16) NOT NULL DEFAULT 'confirmed' COMMENT 'confirmed=真实成功 suspected=疑似成功(809)',
+  note VARCHAR(256) NULL COMMENT '疑似成功说明',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_success_at (success_at),
   KEY idx_account_id (account_id),
-  KEY idx_mobile (mobile)
+  KEY idx_mobile (mobile),
+  KEY idx_kind (kind)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+  } catch (_) {}
+  try {
+    await db.query(
+      `ALTER TABLE seckill_success_logs ADD COLUMN kind VARCHAR(16) NOT NULL DEFAULT 'confirmed' COMMENT 'confirmed=真实成功 suspected=疑似成功(809)' AFTER success_at`
+    );
+  } catch (_) {}
+  try {
+    await db.query(
+      `ALTER TABLE seckill_success_logs ADD COLUMN note VARCHAR(256) NULL COMMENT '疑似成功说明' AFTER kind`
+    );
   } catch (_) {}
 }
 
@@ -201,7 +214,9 @@ async function attachTodaySuccessCounts(users) {
   let rows = [];
   try {
     rows = await db.query(
-      `SELECT account_id, COUNT(*) AS cnt
+      `SELECT account_id,
+              COUNT(*) AS cnt,
+              SUM(CASE WHEN kind = 'suspected' THEN 1 ELSE 0 END) AS suspected_cnt
        FROM seckill_success_logs
        WHERE account_id IN (${placeholders})
          AND success_at >= ? AND success_at < ?
@@ -211,10 +226,15 @@ async function attachTodaySuccessCounts(users) {
   } catch (_) {
     rows = [];
   }
-  const map = new Map();
-  for (const r of rows) map.set(Number(r.account_id), Number(r.cnt) || 0);
+  const countMap = new Map();
+  const suspectedMap = new Map();
+  for (const r of rows) {
+    countMap.set(Number(r.account_id), Number(r.cnt) || 0);
+    suspectedMap.set(Number(r.account_id), Number(r.suspected_cnt) || 0);
+  }
   for (const u of users) {
-    u.todaySuccessCount = map.get(Number(u.id)) || 0;
+    u.todaySuccessCount = countMap.get(Number(u.id)) || 0;
+    u.todaySuspectedCount = suspectedMap.get(Number(u.id)) || 0;
   }
   return users;
 }
@@ -252,6 +272,8 @@ async function listSuccessLogs({ day = null, limit = 500 } = {}) {
       couponId: r.coupon_id,
       stockId: r.stock_id,
       successAt: r.success_at,
+      kind: r.kind || 'confirmed',
+      note: r.note || null,
       buyerNickname: r.buyer_nickname || null,
       actAccount: r.act_account || null,
       nickname: r.nickname || null,
@@ -277,11 +299,104 @@ async function listLevelsByAccountId(accountId) {
   return rows.map(rowToLevel).sort((a, b) => levelRank(a.vipLevel) - levelRank(b.vipLevel));
 }
 
+/**
+ * 合并同账号下相同 vip_level 的重复行（手机号变更时易出现：唯一键是 mobile+level）
+ * 保留 success_count 更高 / id 更大的一条，并同步 mobile
+ */
+async function dedupeLevelsForAccount(accountId, preferredMobile) {
+  const id = Number(accountId);
+  if (!Number.isFinite(id) || id < 1) return 0;
+  const rows = await db.query(
+    `SELECT * FROM account_seckill_levels WHERE account_id = ? ORDER BY id ASC`,
+    [id]
+  );
+  if (!rows.length) return 0;
+
+  const mobile =
+    preferredMobile != null && String(preferredMobile).trim()
+      ? String(preferredMobile).trim()
+      : null;
+
+  const keepByLevel = new Map();
+  const deleteIds = [];
+  for (const row of rows) {
+    const key = normalizeVipLevel(row.vip_level) || String(row.vip_level);
+    const prev = keepByLevel.get(key);
+    if (!prev) {
+      keepByLevel.set(key, {
+        id: row.id,
+        successCount: Number(row.success_count) || 0,
+        targetCount: normalizeTargetCount(row.target_count),
+        lastSuccessAt: row.last_success_at || null,
+      });
+      continue;
+    }
+    const curScore = Number(row.success_count) || 0;
+    const preferCur =
+      curScore > prev.successCount ||
+      (curScore === prev.successCount && Number(row.id) > Number(prev.id));
+    if (preferCur) {
+      deleteIds.push(prev.id);
+      keepByLevel.set(key, {
+        id: row.id,
+        successCount: Math.max(curScore, prev.successCount),
+        targetCount: Math.max(normalizeTargetCount(row.target_count), prev.targetCount),
+        lastSuccessAt: row.last_success_at || prev.lastSuccessAt,
+      });
+    } else {
+      deleteIds.push(row.id);
+      prev.successCount = Math.max(prev.successCount, curScore);
+      prev.targetCount = Math.max(prev.targetCount, normalizeTargetCount(row.target_count));
+      if (!prev.lastSuccessAt && row.last_success_at) prev.lastSuccessAt = row.last_success_at;
+    }
+  }
+
+  for (const delId of deleteIds) {
+    await db.query(`DELETE FROM account_seckill_levels WHERE id = ?`, [delId]);
+  }
+
+  for (const keep of keepByLevel.values()) {
+    const orig = rows.find((r) => r.id === keep.id);
+    if (!orig) continue;
+    const fields = [];
+    const params = [];
+    if (mobile && String(orig.mobile) !== mobile) {
+      fields.push('mobile = ?');
+      params.push(mobile);
+    }
+    if ((Number(orig.success_count) || 0) !== keep.successCount) {
+      fields.push('success_count = ?');
+      params.push(keep.successCount);
+    }
+    if (normalizeTargetCount(orig.target_count) !== keep.targetCount) {
+      fields.push('target_count = ?');
+      params.push(keep.targetCount);
+    }
+    if (fields.length) {
+      params.push(keep.id);
+      await db
+        .query(`UPDATE account_seckill_levels SET ${fields.join(', ')} WHERE id = ?`, params)
+        .catch(() => {});
+    }
+  }
+
+  return deleteIds.length;
+}
+
 async function attachLevels(user) {
   if (!user) return null;
   try {
     let levels = [];
     if (user.id) levels = await listLevelsByAccountId(user.id);
+    // 同账号同等级多行时自动合并（手机号变更遗留）
+    if (user.id && levels.length > 1) {
+      const keys = levels.map((l) => normalizeVipLevel(l.vipLevel) || l.vipLevel);
+      if (new Set(keys).size < keys.length) {
+        const preferred = levelMobileKey(user.mobile, user.id);
+        await dedupeLevelsForAccount(user.id, preferred).catch(() => {});
+        levels = await listLevelsByAccountId(user.id);
+      }
+    }
     if (!levels.length && user.mobile) levels = await listLevelsByMobile(user.mobile);
     // 无手机号时等级表可能用 #id 占位
     if (!levels.length && user.id) {
@@ -532,6 +647,38 @@ async function ensureSeckillLevel({
   const level = normalizeVipLevel(vipLevel);
   if (!level) throw new Error('无效的会员等级');
   const target = normalizeTargetCount(targetCount);
+  const aid = Number(accountId);
+  const mob = String(mobile);
+
+  // 先按账号去重，避免同账号同等级多行（不同 mobile）
+  await dedupeLevelsForAccount(aid, mob).catch(() => {});
+
+  const byAccount = await db.query(
+    `SELECT * FROM account_seckill_levels WHERE account_id = ? AND vip_level = ? ORDER BY id DESC`,
+    [aid, level]
+  );
+  if (byAccount.length) {
+    const keep = byAccount[0];
+    for (const extra of byAccount.slice(1)) {
+      await db.query(`DELETE FROM account_seckill_levels WHERE id = ?`, [extra.id]);
+    }
+    const fields = ['mobile = ?', 'account_id = ?'];
+    const params = [mob, aid];
+    if (syncTarget) {
+      fields.push('target_count = ?');
+      params.push(target);
+    }
+    params.push(keep.id);
+    await db.query(
+      `UPDATE account_seckill_levels SET ${fields.join(', ')} WHERE id = ?`,
+      params
+    );
+    const rows = await db.query(`SELECT * FROM account_seckill_levels WHERE id = ? LIMIT 1`, [
+      keep.id,
+    ]);
+    return rowToLevel(rows[0]);
+  }
+
   if (syncTarget) {
     await db.query(
       `INSERT INTO account_seckill_levels (account_id, mobile, vip_level, target_count, success_count)
@@ -539,19 +686,20 @@ async function ensureSeckillLevel({
        ON DUPLICATE KEY UPDATE
          account_id = VALUES(account_id),
          target_count = VALUES(target_count)`,
-      [Number(accountId), String(mobile), level, target]
+      [aid, mob, level, target]
     );
   } else {
     await db.query(
       `INSERT INTO account_seckill_levels (account_id, mobile, vip_level, target_count, success_count)
        VALUES (?, ?, ?, ?, 0)
        ON DUPLICATE KEY UPDATE account_id = VALUES(account_id)`,
-      [Number(accountId), String(mobile), level, target]
+      [aid, mob, level, target]
     );
   }
   const rows = await db.query(
-    `SELECT * FROM account_seckill_levels WHERE mobile = ? AND vip_level = ? LIMIT 1`,
-    [String(mobile), level]
+    `SELECT * FROM account_seckill_levels WHERE (account_id = ? OR mobile = ?) AND vip_level = ?
+     ORDER BY account_id = ? DESC, id DESC LIMIT 1`,
+    [aid, mob, level, aid]
   );
   return rowToLevel(rows[0]);
 }
@@ -565,14 +713,17 @@ async function addSeckillLevel(accountId, { vipLevel, targetCount } = {}) {
   if (maxRank > 0 && levelRank(level) > maxRank) {
     throw new Error(`不能超过账号最大档位 ${account.vipLevel}`);
   }
+  await dedupeLevelsForAccount(account.id, levelMobileKey(account.mobile, account.id)).catch(
+    () => {}
+  );
   const existing = await db.query(
-    `SELECT id FROM account_seckill_levels WHERE mobile = ? AND vip_level = ? LIMIT 1`,
-    [account.mobile, level]
+    `SELECT id FROM account_seckill_levels WHERE account_id = ? AND vip_level = ? LIMIT 1`,
+    [account.id, level]
   );
   if (existing.length) throw new Error(`该账号已存在抢购等级 ${level}`);
   return ensureSeckillLevel({
     accountId: account.id,
-    mobile: account.mobile,
+    mobile: levelMobileKey(account.mobile, account.id),
     vipLevel: level,
     targetCount: targetCount != null ? targetCount : 1,
     syncTarget: true,
@@ -614,7 +765,24 @@ async function deleteSeckillLevel(levelId) {
   ]);
   const row = rows[0];
   if (!row) return null;
-  const levels = await listLevelsByMobile(row.mobile);
+
+  // 按账号统计（不要只按 mobile：同账号可能有不同 mobile 的重复等级行）
+  let levels = [];
+  if (row.account_id) {
+    levels = await listLevelsByAccountId(row.account_id);
+  }
+  if (!levels.length) {
+    levels = await listLevelsByMobile(row.mobile);
+  }
+
+  const sameVip = levels.filter(
+    (l) => normalizeVipLevel(l.vipLevel) === normalizeVipLevel(row.vip_level)
+  );
+  // 同等级重复行：允许直接删多余的
+  if (sameVip.length > 1) {
+    await db.query(`DELETE FROM account_seckill_levels WHERE id = ?`, [Number(levelId)]);
+    return rowToLevel(row);
+  }
   if (levels.length <= 1) {
     throw new Error('至少保留一个抢购等级');
   }
@@ -726,6 +894,7 @@ function toPublicAccount(user) {
     successCount: user.successCount || 0,
     targetCount: user.targetCount || 1,
     todaySuccessCount: Number(user.todaySuccessCount) || 0,
+    todaySuspectedCount: Number(user.todaySuspectedCount) || 0,
     lastSuccessAt: user.lastSuccessAt || null,
     completed:
       levels.length > 0

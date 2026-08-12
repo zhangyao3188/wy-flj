@@ -372,9 +372,10 @@ function isAcquireSuccess(resp) {
   return false;
 }
 
-/** 已领取 / 无需再抢 */
+/** 已领取 / 无需再抢（不含 809 疑似成功，由 isSuspectedAcquire 单独处理） */
 function isAlreadyAcquired(resp) {
   if (!resp || typeof resp !== 'object') return false;
+  if (isSuspectedAcquire(resp)) return false;
   const msg = String(resp.errmsg || resp.message || '');
   if (/已领取|已经领取|重复领取/.test(msg)) return true;
   const result = resp.result || resp.data || null;
@@ -382,6 +383,15 @@ function isAlreadyAcquired(resp) {
     return true;
   }
   return false;
+}
+
+/** 疑似成功：809 已领取过本轮福利金（不计 success_count，但记入当日成功日志） */
+function isSuspectedAcquire(resp) {
+  if (!resp || typeof resp !== 'object') return false;
+  const code = resp.code != null ? Number(resp.code) : NaN;
+  if (code === 809) return true;
+  const msg = String(resp.errmsg || resp.message || '');
+  return /已经领取过本轮福利金/.test(msg);
 }
 
 function jarToCookieList(jar) {
@@ -700,6 +710,7 @@ module.exports = {
   isSessionExpired,
   isAcquireSuccess,
   isAlreadyAcquired,
+  isSuspectedAcquire,
   jarToCookieList,
   jarToCookieHeader,
   fetchXyUserInfo,

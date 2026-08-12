@@ -204,14 +204,38 @@ CREATE TABLE IF NOT EXISTS \`seckill_success_logs\` (
   \`coupon_id\` VARCHAR(128) NULL,
   \`stock_id\` VARCHAR(256) NULL,
   \`success_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  \`kind\` VARCHAR(16) NOT NULL DEFAULT 'confirmed' COMMENT 'confirmed=真实成功 suspected=疑似成功(809)',
+  \`note\` VARCHAR(256) NULL COMMENT '疑似成功说明',
   \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (\`id\`),
   KEY \`idx_success_at\` (\`success_at\`),
   KEY \`idx_account_id\` (\`account_id\`),
-  KEY \`idx_mobile\` (\`mobile\`)
+  KEY \`idx_mobile\` (\`mobile\`),
+  KEY \`idx_kind\` (\`kind\`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `);
   console.log('[init-db] ensure seckill_success_logs');
+
+  try {
+    await conn.query(
+      `ALTER TABLE \`seckill_success_logs\` ADD COLUMN \`kind\` VARCHAR(16) NOT NULL DEFAULT 'confirmed' COMMENT 'confirmed=真实成功 suspected=疑似成功(809)' AFTER \`success_at\``
+    );
+    console.log('[init-db] added seckill_success_logs.kind');
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      console.warn(`[init-db] seckill_success_logs.kind: ${e.message}`);
+    }
+  }
+  try {
+    await conn.query(
+      `ALTER TABLE \`seckill_success_logs\` ADD COLUMN \`note\` VARCHAR(256) NULL COMMENT '疑似成功说明' AFTER \`kind\``
+    );
+    console.log('[init-db] added seckill_success_logs.note');
+  } catch (e) {
+    if (!/Duplicate column/i.test(e.message || '')) {
+      console.warn(`[init-db] seckill_success_logs.note: ${e.message}`);
+    }
+  }
 
   // 旧账号迁移：无等级记录时，用 accounts 主等级 + 次数生成一条
   const [mig] = await conn.query(`

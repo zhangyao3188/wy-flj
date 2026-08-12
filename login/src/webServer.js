@@ -286,12 +286,17 @@ app.get('/api/accounts', async (req, res) => {
       (sum, a) => sum + (Number(a.todaySuccessCount) || 0),
       0
     );
+    const todaySuspectedOrders = accounts.reduce(
+      (sum, a) => sum + (Number(a.todaySuspectedCount) || 0),
+      0
+    );
     const todaySuccessAccounts = accounts.filter((a) => (a.todaySuccessCount || 0) > 0).length;
     res.json({
       ok: true,
       total: accounts.length,
       vipStats,
       todaySuccessOrders,
+      todaySuspectedOrders,
       todaySuccessAccounts,
       today: accountRepo.chinaDayRange().day,
       accounts,

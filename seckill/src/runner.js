@@ -13,6 +13,7 @@ const {
   isSessionExpired,
   isAcquireSuccess,
   isAlreadyAcquired,
+  isSuspectedAcquire,
   jarToCookieList,
   jarToCookieHeader,
   pickTargetByVip,
@@ -502,6 +503,39 @@ async function fireLoop(client, ready, target, options = {}) {
             .catch((e) => {
               console.warn(
                 `${tag}[seckill] 成功次数异步写库失败: ${e.message || e}`
+              );
+            });
+        }
+        break;
+      }
+
+      if (isSuspectedAcquire(resp)) {
+        success = true;
+        stopReason = 'suspected_success';
+        const mobile = (user && user.mobile) || options.tag;
+        console.log(
+          `${tag}[seckill] 疑似成功 #${attempt} ${cost}ms code=809 → 停止该账号（不计成功次数，记入当日疑似）`
+        );
+        if (mobile) {
+          const levelForCount =
+            (options && options.vipLevel) ||
+            (ready && ready.xyLevel) ||
+            (user && user.forceVipLevel) ||
+            (user && user.vipLevel) ||
+            null;
+          accountRepo
+            .recordSuspectedSuccess(mobile, levelForCount, {
+              accountId: (user && user.id) || options.accountId || null,
+              couponId: ready && ready.couponId,
+              stockId: ready && ready.stockId,
+              errmsg: msg,
+            })
+            .then((ok) => {
+              if (ok) console.log(`${tag}[seckill] 疑似成功已写入当日日志`);
+            })
+            .catch((e) => {
+              console.warn(
+                `${tag}[seckill] 疑似成功写库失败: ${e.message || e}`
               );
             });
         }

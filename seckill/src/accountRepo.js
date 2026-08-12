@@ -21,6 +21,21 @@ function levelRank(lv) {
   return m ? Number(m[1]) : 0;
 }
 
+/** 上海时区当日 [start, end) */
+function chinaDayRange(date = new Date()) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const day = fmt.format(date);
+  const start = new Date(`${day}T00:00:00+08:00`);
+  const end = new Date(`${day}T00:00:00+08:00`);
+  end.setDate(end.getDate() + 1);
+  return { day, start, end };
+}
+
 function rowToLevel(row) {
   if (!row) return null;
   const successCount = Number(row.success_count) || 0;
@@ -304,8 +319,8 @@ async function incrementSuccessCount(mobile, vipLevel = null, meta = {}) {
   try {
     await db.query(
       `INSERT INTO seckill_success_logs
-        (account_id, mobile, vip_level, coupon_id, stock_id, success_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+        (account_id, mobile, vip_level, coupon_id, stock_id, success_at, kind)
+       VALUES (?, ?, ?, ?, ?, ?, 'confirmed')`,
       [
         accountId || null,
         mobile ? String(mobile) : null,
@@ -320,6 +335,58 @@ async function incrementSuccessCount(mobile, vipLevel = null, meta = {}) {
   }
 
   return successCount;
+}
+
+/**
+ * 疑似成功（809 已领取过本轮福利金）：不写 success_count，仅记入当日成功日志
+ * @returns {Promise<boolean>} 是否新写入
+ */
+async function recordSuspectedSuccess(mobile, vipLevel = null, meta = {}) {
+  await ensureAccountColumns();
+  const level = normalizeVipLevel(vipLevel);
+  const now = new Date();
+  let accountId = meta.accountId != null ? Number(meta.accountId) : null;
+  if (!accountId && mobile) {
+    const user = await findByMobile(mobile);
+    if (user) accountId = user.id;
+  }
+
+  const { start, end } = chinaDayRange();
+  try {
+    const dupSql = accountId
+      ? `SELECT id FROM seckill_success_logs
+         WHERE account_id = ? AND vip_level <=> ? AND kind = 'suspected'
+           AND success_at >= ? AND success_at < ? LIMIT 1`
+      : `SELECT id FROM seckill_success_logs
+         WHERE mobile = ? AND vip_level <=> ? AND kind = 'suspected'
+           AND success_at >= ? AND success_at < ? LIMIT 1`;
+    const dupParams = accountId
+      ? [accountId, level || null, start, end]
+      : [String(mobile), level || null, start, end];
+    const existing = await db.query(dupSql, dupParams);
+    if (existing.length) return false;
+  } catch (_) {}
+
+  try {
+    await db.query(
+      `INSERT INTO seckill_success_logs
+        (account_id, mobile, vip_level, coupon_id, stock_id, success_at, kind, note)
+       VALUES (?, ?, ?, ?, ?, ?, 'suspected', ?)`,
+      [
+        accountId || null,
+        mobile ? String(mobile) : null,
+        level || null,
+        meta.couponId ? String(meta.couponId).slice(0, 128) : null,
+        meta.stockId ? String(meta.stockId).slice(0, 256) : null,
+        now,
+        meta.errmsg ? String(meta.errmsg).slice(0, 256) : '809 已领取过本轮福利金',
+      ]
+    );
+    return true;
+  } catch (e) {
+    console.warn(`[accountRepo] 写入疑似成功日志失败: ${e.message || e}`);
+    return false;
+  }
 }
 
 let ensuredColumns = false;
@@ -398,12 +465,25 @@ CREATE TABLE IF NOT EXISTS seckill_success_logs (
   coupon_id VARCHAR(128) NULL,
   stock_id VARCHAR(256) NULL,
   success_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  kind VARCHAR(16) NOT NULL DEFAULT 'confirmed' COMMENT 'confirmed=真实成功 suspected=疑似成功(809)',
+  note VARCHAR(256) NULL COMMENT '疑似成功说明',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_success_at (success_at),
   KEY idx_account_id (account_id),
-  KEY idx_mobile (mobile)
+  KEY idx_mobile (mobile),
+  KEY idx_kind (kind)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+  } catch (_) {}
+  try {
+    await db.query(
+      `ALTER TABLE seckill_success_logs ADD COLUMN kind VARCHAR(16) NOT NULL DEFAULT 'confirmed' COMMENT 'confirmed=真实成功 suspected=疑似成功(809)' AFTER success_at`
+    );
+  } catch (_) {}
+  try {
+    await db.query(
+      `ALTER TABLE seckill_success_logs ADD COLUMN note VARCHAR(256) NULL COMMENT '疑似成功说明' AFTER kind`
+    );
   } catch (_) {}
   try {
     await db.query(`
@@ -436,6 +516,7 @@ module.exports = {
   updateVipLevel,
   updateActAccount,
   incrementSuccessCount,
+  recordSuspectedSuccess,
   ensureSuccessCountColumn,
   ensureAccountColumns,
   normalizeTargetCount,
