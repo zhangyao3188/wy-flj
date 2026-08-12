@@ -405,10 +405,16 @@ app.patch('/api/accounts/:id/levels/:levelId', async (req, res) => {
       }
       patch.targetCount = body.targetCount;
     }
-    if (body.successCount !== undefined) patch.successCount = body.successCount;
+    if (body.successCount !== undefined) {
+      const n = Math.floor(Number(body.successCount));
+      if (!Number.isFinite(n) || n < 0) {
+        return res.status(400).json({ ok: false, message: '成功次数须为大于等于 0 的整数' });
+      }
+      patch.successCount = n;
+    }
     if (body.resetSuccess) patch.resetSuccess = true;
     const level = await accountRepo.updateSeckillLevel(levelId, patch);
-    if (!level || String(level.mobile) !== String(account.mobile)) {
+    if (!level || Number(level.accountId) !== accountId) {
       return res.status(404).json({ ok: false, message: '抢购等级不存在' });
     }
     const fresh = await accountRepo.findById(accountId);
@@ -425,7 +431,7 @@ app.post('/api/accounts/:id/levels/:levelId/delete', async (req, res) => {
     const account = await accountRepo.findById(accountId);
     if (!account) return res.status(404).json({ ok: false, message: '账号不存在' });
     const level = await accountRepo.deleteSeckillLevel(levelId);
-    if (!level || String(level.mobile) !== String(account.mobile)) {
+    if (!level || Number(level.accountId) !== accountId) {
       return res.status(404).json({ ok: false, message: '抢购等级不存在' });
     }
     const fresh = await accountRepo.findById(accountId);

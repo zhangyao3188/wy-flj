@@ -356,8 +356,10 @@
 
   <dialog id="editDlg">
     <form class="dlg" id="editForm">
-      <h2>编辑抢购次数</h2>
-      <p id="editHint">修改后立即生效。</p>
+      <h2>编辑等级次数</h2>
+      <p id="editHint">修改后立即生效。成功次数可手动校正（不含疑似成功）。</p>
+      <label for="editSuccess">成功次数</label>
+      <input id="editSuccess" type="number" min="0" max="9999" step="1" required />
       <label for="editTarget">抢购次数</label>
       <input id="editTarget" type="number" min="1" max="9999" step="1" required />
       <div class="dlg-actions">
@@ -403,6 +405,7 @@
     const toastEl = document.getElementById('toast');
     const editDlg = document.getElementById('editDlg');
     const editForm = document.getElementById('editForm');
+    const editSuccess = document.getElementById('editSuccess');
     const editTarget = document.getElementById('editTarget');
     const editHint = document.getElementById('editHint');
     const addLevelDlg = document.getElementById('addLevelDlg');
@@ -495,7 +498,7 @@
             ${l.completed ? '<span class="tag tag-done">完成</span>' : '<span class="tag tag-ok">抢购中</span>'}
           </div>
           <div class="level-actions">
-            <button class="btn btn-ghost btn-sm" data-act="edit-level" data-level-id="${l.id || ''}" type="button">次数</button>
+            <button class="btn btn-ghost btn-sm" data-act="edit-level" data-level-id="${l.id || ''}" type="button">编辑</button>
             <button class="btn btn-danger btn-sm" data-act="del-level" data-level-id="${l.id || ''}" type="button">删等级</button>
           </div>
         </div>
@@ -755,6 +758,7 @@
           const lv = (acc?.levels || []).find((l) => String(l.id) === String(levelId));
           editing = { accountId, levelId };
           editHint.textContent = `账号 ${mobile} / ${lv?.vipLevel || ''}（当前 ${lv?.successCount || 0}/${lv?.targetCount || 1}）`;
+          editSuccess.value = String(lv?.successCount || 0);
           editTarget.value = String(lv?.targetCount || 1);
           editDlg.showModal();
           return;
@@ -784,8 +788,13 @@
     editForm.addEventListener('submit', async (ev) => {
       ev.preventDefault();
       if (!editing) return;
-      const n = Number(editTarget.value);
-      if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+      const successCount = Number(editSuccess.value);
+      const targetCount = Number(editTarget.value);
+      if (!Number.isFinite(successCount) || successCount < 0 || !Number.isInteger(successCount)) {
+        toast('成功次数须为大于等于 0 的整数');
+        return;
+      }
+      if (!Number.isFinite(targetCount) || targetCount < 1 || !Number.isInteger(targetCount)) {
         toast('抢购次数须为大于等于 1 的整数');
         return;
       }
@@ -793,10 +802,10 @@
         await apiJson(`/api/accounts/${editing.accountId}/levels/${editing.levelId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ targetCount: n }),
+          body: JSON.stringify({ successCount, targetCount }),
         });
         editDlg.close();
-        toast('抢购次数已更新');
+        toast('等级次数已更新');
         await loadAccounts();
       } catch (e) {
         toast(e.message || String(e));
