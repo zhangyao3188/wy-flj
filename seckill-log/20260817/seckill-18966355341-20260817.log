@@ -1,0 +1,130 @@
+============================================================
+[抢购等级] V6
+[开火偏移] 延后 6ms（相对开抢 +6ms）
+[目标开抢] 2026/8/17 11:10:00.000
+[实际开火] 2026/8/17 11:10:00.006
+[请求时间] 2026/8/17 11:10:00.038
+[响应时间] 2026/8/17 11:10:00.261
+[耗时] 223ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"68708705f56f912f57e063c3","stockId":"68708705f56f912f57e063c3_WEEKLY_1786939200000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"eacb25e9-fb30-4ea1-8160-9873460c9ba0","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"2b3623fb-a45b-4a67-a217-2e2bedf8b732","GL-Uid":"29f3b635d5b547deb814e7fc94aa0dc2","GL-CheckSum":"d0e8e821eefb6cd5cfc6212adcb9579b3565e8ca","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":803,"errmsg":"库存已失效"}}
+============================================================
+============================================================
+[抢购等级] V6
+[请求时间] 2026/8/17 11:10:01.414
+[响应时间] 2026/8/17 11:10:01.627
+[耗时] 213ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"68708705f56f912f57e063c3","stockId":"68708705f56f912f57e063c3_WEEKLY_1786939200000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"eacb25e9-fb30-4ea1-8160-9873460c9ba0","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"2b3623fb-a45b-4a67-a217-2e2bedf8b732","GL-Uid":"29f3b635d5b547deb814e7fc94aa0dc2","GL-CheckSum":"d0e8e821eefb6cd5cfc6212adcb9579b3565e8ca","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":803,"errmsg":"库存已失效"}}
+============================================================
+============================================================
+[抢购等级] V6
+[请求时间] 2026/8/17 11:10:02.729
+[响应时间] 2026/8/17 11:10:02.910
+[耗时] 181ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"68708705f56f912f57e063c3","stockId":"68708705f56f912f57e063c3_WEEKLY_1786939200000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"eacb25e9-fb30-4ea1-8160-9873460c9ba0","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"2b3623fb-a45b-4a67-a217-2e2bedf8b732","GL-Uid":"29f3b635d5b547deb814e7fc94aa0dc2","GL-CheckSum":"d0e8e821eefb6cd5cfc6212adcb9579b3565e8ca","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":803,"errmsg":"库存已失效"}}
+============================================================
+============================================================
+[抢购等级] V6
+[请求时间] 2026/8/17 11:10:04.006
+[响应时间] 2026/8/17 11:10:04.193
+[耗时] 187ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"68708705f56f912f57e063c3","stockId":"68708705f56f912f57e063c3_WEEKLY_1786939200000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"eacb25e9-fb30-4ea1-8160-9873460c9ba0","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"2b3623fb-a45b-4a67-a217-2e2bedf8b732","GL-Uid":"29f3b635d5b547deb814e7fc94aa0dc2","GL-CheckSum":"d0e8e821eefb6cd5cfc6212adcb9579b3565e8ca","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":803,"errmsg":"库存已失效"}}
+============================================================
+============================================================
+[抢购等级] V6
+[开火偏移] 延后 6ms（相对开抢 +6ms）
+[目标开抢] 2026/8/17 11:18:00.000
+[实际开火] 2026/8/17 11:18:00.006
+[请求时间] 2026/8/17 11:18:00.029
+[响应时间] 2026/8/17 11:18:00.181
+[耗时] 152ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"68708705f56f912f57e063c3","stockId":"68708705f56f912f57e063c3_WEEKLY_1786939200000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"eacb25e9-fb30-4ea1-8160-9873460c9ba0","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"2b3623fb-a45b-4a67-a217-2e2bedf8b732","GL-Uid":"29f3b635d5b547deb814e7fc94aa0dc2","GL-CheckSum":"d0e8e821eefb6cd5cfc6212adcb9579b3565e8ca","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":803,"errmsg":"库存已失效"}}
+============================================================
+============================================================
+[抢购等级] V6
+[请求时间] 2026/8/17 11:18:01.304
+[响应时间] 2026/8/17 11:18:01.418
+[耗时] 114ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"68708705f56f912f57e063c3","stockId":"68708705f56f912f57e063c3_WEEKLY_1786939200000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"eacb25e9-fb30-4ea1-8160-9873460c9ba0","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"2b3623fb-a45b-4a67-a217-2e2bedf8b732","GL-Uid":"29f3b635d5b547deb814e7fc94aa0dc2","GL-CheckSum":"d0e8e821eefb6cd5cfc6212adcb9579b3565e8ca","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":803,"errmsg":"库存已失效"}}
+============================================================
+============================================================
+[抢购等级] V6
+[开火偏移] 延后 10ms（相对开抢 +10ms）
+[目标开抢] 2026/8/17 12:00:00.000
+[实际开火] 2026/8/17 12:00:00.010
+[请求时间] 2026/8/17 12:00:02.488
+[响应时间] 2026/8/17 12:00:03.686
+[耗时] 1198ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"68708705f56f912f57e063c3","stockId":"68708705f56f912f57e063c3_WEEKLY_1786939200000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"eacb25e9-fb30-4ea1-8160-9873460c9ba0","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"2b3623fb-a45b-4a67-a217-2e2bedf8b732","GL-Uid":"29f3b635d5b547deb814e7fc94aa0dc2","GL-CheckSum":"d0e8e821eefb6cd5cfc6212adcb9579b3565e8ca","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":40009,"errmsg":"活动太火爆了，请稍后再试"}}
+============================================================
+============================================================
+[抢购等级] V6
+[请求时间] 2026/8/17 12:00:04.689
+[响应时间] 2026/8/17 12:00:05.899
+[耗时] 1210ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"68708705f56f912f57e063c3","stockId":"68708705f56f912f57e063c3_WEEKLY_1786939200000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"eacb25e9-fb30-4ea1-8160-9873460c9ba0","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"2b3623fb-a45b-4a67-a217-2e2bedf8b732","GL-Uid":"29f3b635d5b547deb814e7fc94aa0dc2","GL-CheckSum":"d0e8e821eefb6cd5cfc6212adcb9579b3565e8ca","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":40008,"errmsg":"当前库存已不足，敬请参与下期活动噢"}}
+============================================================
+============================================================
+[抢购等级] V6
+[请求时间] 2026/8/17 12:00:06.901
+[响应时间] 2026/8/17 12:00:06.960
+[耗时] 59ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"68708705f56f912f57e063c3","stockId":"68708705f56f912f57e063c3_WEEKLY_1786939200000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"eacb25e9-fb30-4ea1-8160-9873460c9ba0","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"2b3623fb-a45b-4a67-a217-2e2bedf8b732","GL-Uid":"29f3b635d5b547deb814e7fc94aa0dc2","GL-CheckSum":"d0e8e821eefb6cd5cfc6212adcb9579b3565e8ca","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":40009,"errmsg":"活动太火爆了，请稍后再试"}}
+============================================================
+============================================================
+[抢购等级] V6
+[请求时间] 2026/8/17 12:00:07.964
+[响应时间] 2026/8/17 12:00:08.023
+[耗时] 59ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"68708705f56f912f57e063c3","stockId":"68708705f56f912f57e063c3_WEEKLY_1786939200000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"eacb25e9-fb30-4ea1-8160-9873460c9ba0","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"2b3623fb-a45b-4a67-a217-2e2bedf8b732","GL-Uid":"29f3b635d5b547deb814e7fc94aa0dc2","GL-CheckSum":"d0e8e821eefb6cd5cfc6212adcb9579b3565e8ca","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":40009,"errmsg":"活动太火爆了，请稍后再试"}}
+============================================================
+============================================================
+[抢购等级] V6
+[请求时间] 2026/8/17 12:00:09.030
+[响应时间] 2026/8/17 12:00:09.076
+[耗时] 46ms
+[请求路径] https://inf.ds.163.com/v1/web/exp/week-coupon/acquire
+[请求方式] POST
+[请求参数] {"query":null,"body":{"couponId":"68708705f56f912f57e063c3","stockId":"68708705f56f912f57e063c3_WEEKLY_1786939200000"}}
+[请求头] {"Accept":"application/json, text/plain, */*","Content-Type":"application/json;charset=UTF-8","GL-X-XSRF-TOKEN":"eacb25e9-fb30-4ea1-8160-9873460c9ba0","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Origin":"https://pay.ds.163.com","Referer":"https://pay.ds.163.com/","GL-ClientType":"60","GL-DeviceId":"2b3623fb-a45b-4a67-a217-2e2bedf8b732","GL-Uid":"29f3b635d5b547deb814e7fc94aa0dc2","GL-CheckSum":"d0e8e821eefb6cd5cfc6212adcb9579b3565e8ca","Content-Length":"97","Accept-Encoding":"gzip, compress, deflate, br"}
+[响应结果] {"httpStatus":200,"data":{"code":40009,"errmsg":"活动太火爆了，请稍后再试"}}
+============================================================

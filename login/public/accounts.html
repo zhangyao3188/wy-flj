@@ -157,6 +157,7 @@
       font-family: ui-monospace, "SF Mono", Consolas, monospace;
       font-size: 0.84rem;
     }
+    .done-count { color: var(--ok); }
     .muted { color: var(--muted); }
     .cell-sub { font-size: 0.72rem; margin-top: 3px; line-height: 1.35; color: var(--muted); }
     .tag {
@@ -173,6 +174,7 @@
     .tag-offline { background: #fef3f2; color: #b42318; }
     .tag-online { background: #ecfdf3; color: #027a48; }
     .tag-suspected { background: #fffaeb; color: #b54708; }
+    .tag-welfare { background: #eff8ff; color: #175cd3; }
     .online-tags { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
     .levels { display: flex; flex-direction: column; gap: 6px; }
     .level-row {
@@ -307,12 +309,13 @@
               <th>买家昵称</th>
               <th>账户名称</th>
               <th>等级</th>
+              <th>次数</th>
               <th>couponId</th>
               <th>stockId</th>
             </tr>
           </thead>
           <tbody id="successBody">
-            <tr><td colspan="8" class="loading">加载中…</td></tr>
+            <tr><td colspan="9" class="loading">加载中…</td></tr>
           </tbody>
         </table>
       </div>
@@ -417,7 +420,7 @@
     let editingBuyerId = null;
     let accountsCache = [];
     let successLogsCache = [];
-    let todayMeta = { day: '', orders: 0, suspectedOrders: 0, accounts: 0 };
+    let todayMeta = { day: '', orders: 0, suspectedOrders: 0, welfareOrders: 0, accounts: 0 };
     let toastTimer = null;
 
     function toast(msg, ms) {
@@ -527,6 +530,10 @@
     }
 
     function successKindTag(l) {
+      if (l.kind === 'welfare') {
+        const lv = l.vipLevel || '';
+        return `<span class="tag tag-welfare" title="${escapeHtml(l.note || `福利${lv}等级抢购成功`)}">福利${escapeHtml(lv || '?')}</span>`;
+      }
       if (l.kind === 'suspected') {
         return `<span class="tag tag-suspected" title="${escapeHtml(l.note || '809 已领取过本轮福利金')}">疑似成功</span>`;
       }
@@ -537,20 +544,33 @@
       const total = a.todaySuccessCount || 0;
       if (!total) return '0';
       const suspected = a.todaySuspectedCount || 0;
-      const confirmed = total - suspected;
-      if (suspected > 0 && confirmed > 0) {
-        return `<strong style="color:var(--ok)">${confirmed}</strong><div class="cell-sub" style="color:var(--warn)">+疑${suspected}</div>`;
-      }
-      if (suspected > 0) {
-        return `<strong style="color:var(--warn)" title="疑似成功（809 已领取过本轮福利金）">${total}</strong><div class="cell-sub">疑似</div>`;
+      const welfare = a.todayWelfareCount || 0;
+      const confirmed = total - suspected - welfare;
+      const extras = [];
+      if (welfare > 0) extras.push(`福${welfare}`);
+      if (suspected > 0) extras.push(`疑${suspected}`);
+      if (extras.length) {
+        const main =
+          confirmed > 0
+            ? `<strong style="color:var(--ok)">${confirmed}</strong>`
+            : `<strong style="color:var(--warn)">${total}</strong>`;
+        return `${main}<div class="cell-sub" style="color:var(--muted)">+${extras.join(' +')}</div>`;
       }
       return `<strong style="color:var(--ok)">${total}</strong>`;
+    }
+
+    function renderSuccessCount(l) {
+      const sc = l.successCount;
+      const tc = l.targetCount;
+      if (sc == null || tc == null) return '<span class="muted">—</span>';
+      const done = Number(sc) >= Number(tc);
+      return `<span class="mono${done ? ' done-count' : ''}"><strong>${sc}</strong>/${tc}</span>`;
     }
 
     function renderSuccessRows(logs) {
       const body = document.getElementById('successBody');
       if (!logs.length) {
-        body.innerHTML = '<tr><td colspan="8" class="empty">当日暂无抢购成功订单</td></tr>';
+        body.innerHTML = '<tr><td colspan="9" class="empty">当日暂无抢购成功订单</td></tr>';
         return;
       }
       body.innerHTML = logs.map((l) => `
@@ -561,6 +581,7 @@
           <td>${escapeHtml(l.buyerNickname || '—')}</td>
           <td class="mono">${escapeHtml(l.actAccount || '—')}</td>
           <td><strong>${escapeHtml(l.vipLevel || '—')}</strong></td>
+          <td>${renderSuccessCount(l)}</td>
           <td class="mono" style="font-size:0.78rem">${escapeHtml(l.couponId || '—')}</td>
           <td class="mono" style="font-size:0.78rem">${escapeHtml(l.stockId || '—')}</td>
         </tr>
@@ -574,11 +595,15 @@
       panel.style.display = show ? 'block' : 'none';
       if (!show) return;
       const suspectedN = successLogsCache.filter((l) => l.kind === 'suspected').length;
+      const welfareN = successLogsCache.filter((l) => l.kind === 'welfare').length;
       document.getElementById('successTitle').textContent =
         `当日抢购成功订单（${todayMeta.day || '今日'}）`;
+      const extraParts = [];
+      if (welfareN > 0) extraParts.push(`福利 ${welfareN}`);
+      if (suspectedN > 0) extraParts.push(`疑似 ${suspectedN}`);
       document.getElementById('successSub').textContent =
-        suspectedN > 0
-          ? `共 ${successLogsCache.length} 笔（含疑似 ${suspectedN}）· ${todayMeta.accounts || 0} 个账号`
+        extraParts.length
+          ? `共 ${successLogsCache.length} 笔（含${extraParts.join('、')}）· ${todayMeta.accounts || 0} 个账号`
           : `共 ${successLogsCache.length} 笔 · ${todayMeta.accounts || 0} 个账号`;
       const mobileQ = String(document.getElementById('filterMobile').value || '')
         .trim()
@@ -634,9 +659,13 @@
       statsEl.innerHTML = [
         `<span class="chip">共 <strong>${total}</strong> 个账号</span>`,
         filtered.length !== total
-          ? `<span class="chip">当前显示 <strong>${filtered.length}</strong></span>`
+          ? `<span class="chip">当前显示 <strong>${filtered.length}</strong> 个账号</span>`
           : '',
         `<span class="chip">今日成功 <strong>${todayMeta.orders || 0}</strong> 笔${
+          todayMeta.welfareOrders
+            ? `（福 <strong>${todayMeta.welfareOrders}</strong>）`
+            : ''
+        }${
           todayMeta.suspectedOrders
             ? `（疑 <strong>${todayMeta.suspectedOrders}</strong>）`
             : ''
@@ -673,6 +702,7 @@
           day: accRes.today || todayMeta.day || '',
           orders: accRes.todaySuccessOrders || 0,
           suspectedOrders: accRes.todaySuspectedOrders || 0,
+          welfareOrders: accRes.todayWelfareOrders || 0,
           accounts: accRes.todaySuccessAccounts || 0,
         };
         if (!accountsCache.length) {

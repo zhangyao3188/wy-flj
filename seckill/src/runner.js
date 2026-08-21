@@ -19,10 +19,11 @@ const {
   pickTargetByVip,
   findSamePeriod,
   fetchShowingList,
-  fetchXyUserInfo,
-  parseCurrentLv,
-  resolveMaxVipLevel,
+  resolveSeckillLevel,
+  annotateSeckillJobs,
+  levelRank,
   acquire,
+  prepareAcquirePayload,
   syncServerTime,
   nowMs,
   normalizeLevel,
@@ -114,8 +115,10 @@ function resolveFireEarlyMs(options = {}) {
 
 const FIRE_OFFSET_RANGE = resolveFireOffsetRange();
 const FIRE_EARLY_MS = FIRE_OFFSET_RANGE; // 兼容导出名，值为区间对象
-/** 开抢前多少毫秒再预热一遍 */
+/** 开抢前多少毫秒再预热一遍（会话/showing-list） */
 const WARMUP_BEFORE_MS = 15000;
+/** 开抢前多少毫秒调用一次 acquire 预热连接（默认 5s，须 ≥1s 频率限制） */
+const ACQUIRE_WARMUP_MS_DEFAULT = 5000;
 /** 正式倒计时展示窗口（末 N 毫秒精确到 ms） */
 const COUNTDOWN_LAST_MS = 10000;
 /** 测试模式：距整分不足该秒数时跳到下下整分（默认 50） */
@@ -206,7 +209,56 @@ function resolveAcquireIntervalMs(options = {}) {
   }
   const fromEnv = Number(process.env.ACQUIRE_INTERVAL_MS);
   if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv;
-  return 0;
+  return 1000;
+}
+
+function resolveAcquireWarmupMs(options = {}) {
+  if (options.acquireWarmupMs != null && Number.isFinite(Number(options.acquireWarmupMs))) {
+    return Math.max(0, Number(options.acquireWarmupMs));
+  }
+  const fromEnv = Number(process.env.ACQUIRE_WARMUP_MS);
+  if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv;
+  return ACQUIRE_WARMUP_MS_DEFAULT;
+}
+
+/**
+ * 开抢前 N 秒打一发 acquire 预热 TLS/链路（不写抢购日志；与正式开火间隔 >1s 避免火爆）
+ */
+async function runAcquireConnectionWarmup(account, fireAt, options = {}) {
+  const ms = resolveAcquireWarmupMs(options);
+  if (!ms || !account || !account.ready || account.skipSeckill) return;
+  const warmAt = fireAt - ms;
+  const tag = `[${account.mobile}/${account.vipLevel || '?'}] `;
+  if (nowMs() < warmAt) {
+    await waitUntilServer(warmAt, { label: `${account.mobile} acquire预热` });
+  }
+  console.log(
+    `${tag}开抢前 ${(ms / 1000).toFixed(1)}s acquire 接口预热（复用连接，结果忽略，不写抢购日志）`
+  );
+  try {
+    const t0 = Date.now();
+    const resp = await acquire(account.client, {
+      couponId: account.ready.couponId,
+      stockId: account.ready.stockId,
+      fireMeta: { warmupAcquire: true },
+    });
+    const cost = Date.now() - t0;
+    const code = resp && resp.code;
+    const msg = (resp && (resp.errmsg || resp.message)) || '';
+    console.log(
+      `${tag}acquire 预热完成 ${cost}ms code=${code} ${String(msg).slice(0, 100)}`
+    );
+    account.acquireWarmedAt = Date.now();
+  } catch (e) {
+    console.warn(`${tag}acquire 预热异常（可忽略）: ${e.message || e}`);
+  }
+}
+
+/** 开抢前预组装 acquire 参数（XSRF 刷新后调用） */
+function bindPreparedAcquire(account) {
+  if (!account || !account.ready) return null;
+  account.preparedAcquire = prepareAcquirePayload(account.ready);
+  return account.preparedAcquire;
 }
 
 async function calibrateClock(client, tag = '[seckill] ') {
@@ -258,7 +310,7 @@ function inferStockId(target) {
   return null;
 }
 
-async function persistCookies(user, jar, tag = '', extra = {}) {
+async function persistCookies(user, jar, tag = '') {
   try {
     const cookies = jarToCookieList(jar);
     const cookieHeader = jarToCookieHeader(jar);
@@ -268,18 +320,16 @@ async function persistCookies(user, jar, tag = '', extra = {}) {
       cookieHeader,
       godUuid,
       deviceId: user.deviceId || null,
-      ...(extra.vipLevel ? { vipLevel: extra.vipLevel } : {}),
-      ...(extra.vipRaw != null ? { vipRaw: extra.vipRaw } : {}),
     });
-    if (tag) console.log(`${tag}已将刷新后的 cookie${extra.vipLevel ? `/等级${extra.vipLevel}` : ''} 写回数据库`);
+    if (tag) console.log(`${tag}已将刷新后的 cookie 写回数据库`);
   } catch (e) {
     console.warn(`${tag}写回 cookie 失败: ${e.message || e}`);
   }
 }
 
 /**
- * 预热：走一遍抢购链路（xsrf → nlogin → cookie-exchange → get-info等级 → showing-list → 预备参数）
- * 等级以 get-info.currentLv 为准（账号最大可抢档位）；若过期则更新 cookie。
+ * 预热：xsrf → nlogin → cookie-exchange → showing-list → 预备参数
+ * 抢购档位以库内配置为准，不再拉 get-info 同步等级。
  */
 async function warmupSession(account, { label = '预热' } = {}) {
   const tag = `[${account.mobile}/${account.forceVipLevel || account.vipLevel || '?'}] `;
@@ -296,27 +346,12 @@ async function warmupSession(account, { label = '预热' } = {}) {
   }
   await ensureXsrf(client, jar);
 
-  // 拉取账号最大档位
-  let vipData = null;
-  try {
-    vipData = await fetchXyUserInfo(client);
-    if (isSessionExpired(vipData)) {
-      console.warn(`${tag}${label} get-info 会话过期(873)，重新 cookie-exchange…`);
-      await cookieExchange(client);
-      await ensureXsrf(client, jar);
-      vipData = await fetchXyUserInfo(client);
-    }
-  } catch (e) {
-    console.warn(`${tag}${label} get-info 失败: ${e.message || e}`);
-  }
-
   let listResp = await fetchShowingList(client);
   if (isSessionExpired(listResp)) {
     console.warn(`${tag}${label}检测到会话过期(873)，重新 cookie-exchange…`);
     await cookieExchange(client);
     await ensureXsrf(client, jar);
     await ensureSession(client).catch(() => null);
-    vipData = await fetchXyUserInfo(client).catch(() => vipData);
     listResp = await fetchShowingList(client);
     if (isSessionExpired(listResp)) {
       throw new Error('会话仍过期(873)，请重新通过 login 登录');
@@ -328,41 +363,45 @@ async function warmupSession(account, { label = '预热' } = {}) {
   }
 
   const listResult = listResp.result || listResp.data || listResp;
-  const fromApiLv = parseCurrentLv(vipData);
-  const maxVipLevel = resolveMaxVipLevel(
-    vipData,
+  const configuredLevel = normalizeLevel(
+    account.forceVipLevel || account.seckillLevel || account.vipLevel || 'V1'
+  );
+  const resolved = resolveSeckillLevel(
+    configuredLevel,
     listResult,
-    account.maxVipLevel || (user && user.maxVipLevel) || (user && user.vipLevel) || null
+    account.allConfiguredLevels || [configuredLevel],
+    { isHighestConfiguredTask: account.isHighestConfiguredTask !== false }
   );
-  account.maxVipLevel = maxVipLevel;
-  // 指定抢购等级（多等级并行）；否则用最大档
-  const seckillLevel = normalizeLevel(
-    account.forceVipLevel || account.seckillLevel || account.vipLevel || maxVipLevel
-  );
+
+  if (!resolved.ok) {
+    throw new Error(resolved.reason);
+  }
+
+  if (resolved.skip) {
+    account.skipSeckill = true;
+    account.skipReason = resolved.reason;
+    account.configuredLevel = configuredLevel;
+    console.log(`${tag}${label}${resolved.reason}，跳过本任务`);
+    return account;
+  }
+
+  const seckillLevel = resolved.level;
+  account.configuredLevel = resolved.configuredLevel;
   account.vipLevel = seckillLevel;
-  if (user) {
-    user.maxVipLevel = maxVipLevel;
-    // 不覆盖 user 主档；抢购用 account.vipLevel
-  }
+  account.downgraded = !!resolved.downgraded;
+  account.welfareLevel = resolved.downgraded ? seckillLevel : null;
+  account.maxVipLevel =
+    account.maxVipLevel || (user && user.maxVipLevel) || (user && user.vipLevel) || seckillLevel;
 
-  // 仅当 get-info 真正返回 currentLv 时才写回等级，避免 825/失败把 V5 覆盖成 V1
-  await persistCookies(user || { mobile: account.mobile }, jar, tag, {
-    ...(fromApiLv ? { vipLevel: maxVipLevel, vipRaw: vipData } : {}),
-  });
+  await persistCookies(user || { mobile: account.mobile }, jar, tag);
 
-  if (!fromApiLv) {
-    console.warn(
-      `${tag}${label} get-info 未返回 currentLv（code=${
-        vipData && vipData.code
-      }），沿用库内/任务档位 ${maxVipLevel}，不覆盖数据库等级`
+  if (resolved.downgraded) {
+    console.log(
+      `${tag}${label}配置档=${configuredLevel} 下架 → 福利降级抢购 ${seckillLevel}（不回写库、不计配置档成功次数）`
     );
+  } else {
+    console.log(`${tag}${label}本任务抢购档=${seckillLevel}（库内配置）`);
   }
-
-  console.log(
-    `${tag}${label}账号最大档位=${maxVipLevel}；本任务抢购档=${seckillLevel}${
-      seckillLevel !== maxVipLevel ? '（低于最大档）' : ''
-    }`
-  );
 
   const { target, reason, candidates } = pickTargetByVip(listResult, seckillLevel);
   if (!target || !target.couponId || !Number.isFinite(target.seckillStartTime)) {
@@ -465,11 +504,22 @@ async function fireLoop(client, ready, target, options = {}) {
     attempt += 1;
     const t0 = Date.now();
     try {
-      const fireMeta = attempt === 1 ? firstFireMeta : null;
+      const seckillLevel =
+        (options && options.vipLevel) ||
+        (ready && ready.xyLevel) ||
+        (user && user.vipLevel) ||
+        null;
+      const fireMeta = {
+        seckillLevel,
+        configuredLevel: options.configuredLevel || (user && user.forceVipLevel) || null,
+        downgraded: !!options.downgraded,
+        ...(attempt === 1 ? firstFireMeta : {}),
+      };
       const resp = await acquire(client, {
+        body: options.preparedAcquire || undefined,
         couponId: ready.couponId,
         stockId: ready.stockId,
-        ...(fireMeta ? { fireMeta } : {}),
+        fireMeta,
       });
       const cost = Date.now() - t0;
       const code = resp && resp.code;
@@ -480,31 +530,65 @@ async function fireLoop(client, ready, target, options = {}) {
         success = true;
         stopReason = 'acquired';
         const mobile = (user && user.mobile) || options.tag;
+        const downgraded = !!options.downgraded;
+        const configuredLevel =
+          options.configuredLevel ||
+          (user && user.forceVipLevel) ||
+          (user && user.vipLevel) ||
+          null;
+        const actualLevel =
+          (ready && ready.xyLevel) ||
+          (options && options.vipLevel) ||
+          (user && user.vipLevel) ||
+          null;
         console.log(
-          `${tag}[seckill] SUCCESS #${attempt} ${cost}ms received=true → 停止该账号`
+          `${tag}[seckill] SUCCESS #${attempt} ${cost}ms received=true → 停止该账号${
+            downgraded ? `（福利${actualLevel}，配置${configuredLevel}）` : ''
+          }`
         );
         if (mobile) {
-          const levelForCount =
-            (options && options.vipLevel) ||
-            (ready && ready.xyLevel) ||
-            (user && user.forceVipLevel) ||
-            (user && user.vipLevel) ||
-            null;
-          accountRepo
-            .incrementSuccessCount(mobile, levelForCount, {
-              accountId: (user && user.id) || options.accountId || null,
-              couponId: ready && ready.couponId,
-              stockId: ready && ready.stockId,
-            })
-            .then((n) => {
-              successCount = n;
-              console.log(`${tag}[seckill] 成功次数已异步写入 successCount=${n}`);
-            })
-            .catch((e) => {
-              console.warn(
-                `${tag}[seckill] 成功次数异步写库失败: ${e.message || e}`
-              );
-            });
+          if (downgraded) {
+            accountRepo
+              .recordWelfareSuccess(mobile, configuredLevel, actualLevel, {
+                accountId: (user && user.id) || options.accountId || null,
+                couponId: ready && ready.couponId,
+                stockId: ready && ready.stockId,
+              })
+              .then((ok) => {
+                if (ok) {
+                  console.log(
+                    `${tag}[seckill] 福利${actualLevel}抢购成功已写入当日日志（配置${configuredLevel}）`
+                  );
+                }
+              })
+              .catch((e) => {
+                console.warn(
+                  `${tag}[seckill] 福利成功写库失败: ${e.message || e}`
+                );
+              });
+          } else {
+            const levelForCount =
+              (options && options.vipLevel) ||
+              (ready && ready.xyLevel) ||
+              (user && user.forceVipLevel) ||
+              (user && user.vipLevel) ||
+              null;
+            accountRepo
+              .incrementSuccessCount(mobile, levelForCount, {
+                accountId: (user && user.id) || options.accountId || null,
+                couponId: ready && ready.couponId,
+                stockId: ready && ready.stockId,
+              })
+              .then((n) => {
+                successCount = n;
+                console.log(`${tag}[seckill] 成功次数已异步写入 successCount=${n}`);
+              })
+              .catch((e) => {
+                console.warn(
+                  `${tag}[seckill] 成功次数异步写库失败: ${e.message || e}`
+                );
+              });
+          }
         }
         break;
       }
@@ -513,31 +597,62 @@ async function fireLoop(client, ready, target, options = {}) {
         success = true;
         stopReason = 'suspected_success';
         const mobile = (user && user.mobile) || options.tag;
+        const downgraded = !!options.downgraded;
+        const configuredLevel =
+          options.configuredLevel ||
+          (user && user.forceVipLevel) ||
+          null;
+        const actualLevel =
+          (ready && ready.xyLevel) ||
+          (options && options.vipLevel) ||
+          null;
         console.log(
-          `${tag}[seckill] 疑似成功 #${attempt} ${cost}ms code=809 → 停止该账号（不计成功次数，记入当日疑似）`
+          `${tag}[seckill] 疑似成功 #${attempt} ${cost}ms code=809 → 停止该账号（不计 success_count；仅当日尚无真实成功时记入疑似）`
         );
         if (mobile) {
-          const levelForCount =
-            (options && options.vipLevel) ||
-            (ready && ready.xyLevel) ||
-            (user && user.forceVipLevel) ||
-            (user && user.vipLevel) ||
-            null;
-          accountRepo
-            .recordSuspectedSuccess(mobile, levelForCount, {
-              accountId: (user && user.id) || options.accountId || null,
-              couponId: ready && ready.couponId,
-              stockId: ready && ready.stockId,
-              errmsg: msg,
-            })
-            .then((ok) => {
-              if (ok) console.log(`${tag}[seckill] 疑似成功已写入当日日志`);
-            })
-            .catch((e) => {
-              console.warn(
-                `${tag}[seckill] 疑似成功写库失败: ${e.message || e}`
-              );
-            });
+          if (downgraded) {
+            accountRepo
+              .recordWelfareSuccess(mobile, configuredLevel, actualLevel, {
+                accountId: (user && user.id) || options.accountId || null,
+                couponId: ready && ready.couponId,
+                stockId: ready && ready.stockId,
+                note: msg || `809 已领取（福利${actualLevel}）`,
+              })
+              .then((ok) => {
+                if (ok) console.log(`${tag}[seckill] 福利疑似成功已写入当日日志`);
+              })
+              .catch((e) => {
+                console.warn(
+                  `${tag}[seckill] 福利疑似成功写库失败: ${e.message || e}`
+                );
+              });
+          } else {
+            const levelForCount =
+              (options && options.vipLevel) ||
+              (ready && ready.xyLevel) ||
+              (user && user.forceVipLevel) ||
+              (user && user.vipLevel) ||
+              null;
+            accountRepo
+              .recordSuspectedSuccess(mobile, levelForCount, {
+                accountId: (user && user.id) || options.accountId || null,
+                couponId: ready && ready.couponId,
+                stockId: ready && ready.stockId,
+                errmsg: msg,
+              })
+              .then((ok) => {
+                if (ok) console.log(`${tag}[seckill] 疑似成功已写入当日日志`);
+                else
+                  console.log(
+                    `${tag}[seckill] 未写入疑似（当日已有真实成功或重复）`
+                  );
+              })
+              .catch((e) => {
+                console.warn(
+                  `${tag}[seckill] 疑似成功写库失败: ${e.message || e}`
+                );
+              });
+          }
         }
         break;
       }
@@ -624,6 +739,22 @@ async function prepareAccount(mobile, options = {}) {
   const vipLevel = normalizeLevel(
     options.vipLevel || user.forceVipLevel || user.vipLevel || 'V1'
   );
+
+  if (!user.allConfiguredLevels || !user.allConfiguredLevels.length) {
+    const levels = await accountRepo.listLevelsByMobile(user.mobile);
+    const activeLevels = levels.filter((l) => !l.completed);
+    user.allConfiguredLevels = (activeLevels.length ? activeLevels : levels)
+      .map((l) => normalizeLevel(l.vipLevel))
+      .filter(Boolean);
+    if (!user.allConfiguredLevels.length) {
+      user.allConfiguredLevels = [vipLevel];
+    }
+    if (user.isHighestConfiguredTask == null) {
+      const maxRank = Math.max(...user.allConfiguredLevels.map((l) => levelRank(l)));
+      user.isHighestConfiguredTask = levelRank(vipLevel) >= maxRank;
+    }
+  }
+
   const { client, jar, logFile } = createClientFromUser(user);
 
   const account = {
@@ -633,17 +764,25 @@ async function prepareAccount(mobile, options = {}) {
     forceVipLevel: user.forceVipLevel || options.vipLevel || vipLevel,
     maxVipLevel: user.maxVipLevel || user.vipLevel,
     levelId: user.levelId != null ? user.levelId : null,
+    allConfiguredLevels: user.allConfiguredLevels || [vipLevel],
+    isHighestConfiguredTask: user.isHighestConfiguredTask !== false,
     client,
     jar,
     logFile,
     user,
     alreadyAcquired: false,
+    skipSeckill: false,
+    downgraded: false,
     nloginOk: false,
     hasGodUuid: !!user.godUuid,
   };
 
   // 启动时预热一遍（含过期则更新 cookie）
   await warmupSession(account, { label: '启动预热' });
+
+  if (account.skipSeckill) {
+    return account;
+  }
 
   const session = await ensureSession(client).catch(() => null);
   account.nloginOk = !!(session && (session.code === 200 || session.status === 200));
@@ -666,8 +805,22 @@ async function runSeckill(mobile, options = {}) {
   console.log(`[seckill] 用户=${mobile}${immediate ? ' [测试倒计时抢]' : ''}`);
   const account = await prepareAccount(mobile, options);
 
+  if (account.skipSeckill) {
+    console.log(`[seckill] 跳过: ${account.skipReason || '任务无需抢购'}`);
+    return {
+      success: false,
+      skipped: true,
+      mobile: account.mobile,
+      configuredLevel: account.configuredLevel,
+      stopReason: 'skipped',
+      message: account.skipReason,
+    };
+  }
+
   console.log(
-    `[seckill] 用户=${account.mobile} 昵称=${account.nickname} 等级=${account.vipLevel}`
+    `[seckill] 用户=${account.mobile} 昵称=${account.nickname} 等级=${account.vipLevel}${
+      account.downgraded ? `（福利降级，配置${account.configuredLevel}）` : ''
+    }`
   );
   if (account.logFile) console.log(`[seckill] 详细日志: ${account.logFile}`);
   if (account.nloginOk) console.log('[seckill] nlogin 成功');
@@ -711,18 +864,14 @@ async function runSeckill(mobile, options = {}) {
     ? resolveTestFireAt(options, nowMs())
     : account.ready.seckillStartTime;
   const fireAt = baseAt + fireOffsetMs;
-  const span = Math.max(Math.abs(fireRange.min), Math.abs(fireRange.max), Math.abs(fireOffsetMs));
 
   if (immediate) {
     const schedText = new Date(baseAt).toLocaleString('zh-CN', { hour12: false });
     const fireText = `${new Date(fireAt).toLocaleString('zh-CN', {
       hour12: false,
     })}.${String(fireAt % 1000).padStart(3, '0')}`;
-    const xsrfAt = fireAt - Math.max(1500, span + 500);
-    if (nowMs() < xsrfAt) {
-      await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
-    }
-    await ensureXsrf(account.client, account.jar);
+    await runAcquireConnectionWarmup(account, fireAt, options);
+    bindPreparedAcquire(account);
     const left = fireAt - nowMs();
     if (left <= 0) {
       console.log(
@@ -752,6 +901,17 @@ async function runSeckill(mobile, options = {}) {
 
     if (nowMs() < fireAt) {
       await warmupSession(account, { label: '开抢前预热' });
+      if (account.skipSeckill) {
+        console.log(`[seckill] 跳过: ${account.skipReason || '任务无需抢购'}`);
+        return {
+          success: false,
+          skipped: true,
+          mobile: account.mobile,
+          configuredLevel: account.configuredLevel,
+          stopReason: 'skipped',
+          message: account.skipReason,
+        };
+      }
       if (account.alreadyAcquired) {
         console.log('[seckill] 开抢前预热发现已领取，跳过开火');
         return {
@@ -767,11 +927,8 @@ async function runSeckill(mobile, options = {}) {
       await calibrateClock(account.client);
     }
 
-    const xsrfAt = fireAt - Math.max(1500, span + 500);
-    if (nowMs() < xsrfAt) {
-      await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
-    }
-    await ensureXsrf(account.client, account.jar);
+    await runAcquireConnectionWarmup(account, fireAt, options);
+    bindPreparedAcquire(account);
 
     if (nowMs() < fireAt) {
       console.log(
@@ -804,6 +961,9 @@ async function runSeckill(mobile, options = {}) {
     user: account.user,
     accountId: (account.user && account.user.id) || null,
     vipLevel: account.vipLevel,
+    configuredLevel: account.configuredLevel,
+    downgraded: account.downgraded,
+    preparedAcquire: account.preparedAcquire,
     fireOffsetMs,
     fireOffsetLabel: formatFireOffsetLabel(fireOffsetMs),
     fireBaseAt: baseAt,
@@ -813,6 +973,8 @@ async function runSeckill(mobile, options = {}) {
     ...result,
     mobile: account.mobile,
     vipLevel: account.vipLevel,
+    configuredLevel: account.configuredLevel,
+    downgraded: account.downgraded,
     fireOffsetMs,
   };
 }
@@ -821,9 +983,13 @@ module.exports = {
   runSeckill,
   prepareAccount,
   warmupSession,
+  annotateSeckillJobs,
   fireLoop,
   formatLeft,
   resolveAcquireIntervalMs,
+  resolveAcquireWarmupMs,
+  runAcquireConnectionWarmup,
+  bindPreparedAcquire,
   calibrateClock,
   waitUntilServer,
   parseTestStartTime,

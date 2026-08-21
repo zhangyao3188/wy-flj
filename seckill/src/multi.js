@@ -5,13 +5,17 @@ const localEnv = path.resolve(__dirname, '../.env');
 if (fs.existsSync(localEnv)) require('dotenv').config({ path: localEnv });
 
 const accountRepo = require('./accountRepo');
-const { ensureXsrf, waitUntil, nowMs } = require('./client');
+const { waitUntil, nowMs } = require('./client');
 const {
   prepareAccount,
+  annotateSeckillJobs,
   warmupSession,
   fireLoop,
   formatLeft,
   resolveAcquireIntervalMs,
+  resolveAcquireWarmupMs,
+  runAcquireConnectionWarmup,
+  bindPreparedAcquire,
   calibrateClock,
   waitUntilServer,
   resolveTestFireAt,
@@ -95,6 +99,7 @@ async function loadAccountsFromDb(mobilesFilter) {
   if (!users.length) {
     throw new Error('线上数据库无可用抢购任务（可能均已达设定次数），请先通过 login 配置账号/等级');
   }
+  annotateSeckillJobs(users);
   return users;
 }
 
@@ -121,8 +126,9 @@ async function runMulti(options = {}) {
     `[dev] 任务: ${users.map((u) => `${u.mobile}/${u.vipLevel}(${u.successCount}/${u.targetCount})`).join(', ')}`
   );
   const intervalMs = resolveAcquireIntervalMs(options);
+  const acquireWarmupMs = resolveAcquireWarmupMs(options);
   console.log(
-    `[dev] 启动预热 + 开抢前 ${warmupBeforeMs / 1000}s 再预热；成功即停；轮询间隔=${intervalMs}ms；开火偏移区间 FIRE_EARLY_MS=${formatFireRangeLabel(
+    `[dev] 启动预热 + 开抢前 ${warmupBeforeMs / 1000}s 再预热；acquire 连接预热=${acquireWarmupMs}ms；轮询间隔=${intervalMs}ms；开火偏移区间 FIRE_EARLY_MS=${formatFireRangeLabel(
       fireRange
     )}（负=提前，正=延后，账号内随机）；末${COUNTDOWN_LAST_MS / 1000}s毫秒倒计时`
   );
@@ -150,21 +156,33 @@ async function runMulti(options = {}) {
     else failed.push({ mobile: r.mobile, error: r.error });
   }
 
+  const skippedTasks = prepared.filter((a) => a.skipSeckill);
+  for (const a of skippedTasks) {
+    console.log(
+      `[dev] 跳过任务 ${a.mobile}/${a.configuredLevel || a.forceVipLevel}: ${a.skipReason || '无需抢购'}`
+    );
+  }
+  const activePrepared = prepared.filter((a) => !a.skipSeckill);
+
   for (const f of failed) {
     console.error(`[dev] 启动预热失败 ${f.mobile}: ${f.error}`);
   }
-  if (!prepared.length) {
-    throw new Error('全部账号预热失败，无法开抢');
+  if (!activePrepared.length) {
+    throw new Error(
+      skippedTasks.length
+        ? '全部任务已跳过或预热失败，无法开抢'
+        : '全部账号预热失败，无法开抢'
+    );
   }
 
   // 每个账号在区间内随机一个开火偏移
-  for (const a of prepared) {
+  for (const a of activePrepared) {
     a.fireOffsetMs = sampleFireOffset(fireRange);
   }
 
   console.log('');
-  console.log(`[dev] 启动预热成功 ${prepared.length}/${mobiles.length}`);
-  for (const a of prepared) {
+  console.log(`[dev] 启动预热成功 ${activePrepared.length}/${users.length} 个有效任务`);
+  for (const a of activePrepared) {
     const startAt = new Date(a.ready.seckillStartTime).toLocaleString('zh-CN', {
       hour12: false,
     });
@@ -173,16 +191,14 @@ async function runMulti(options = {}) {
     );
     if (a.logFile) console.log(`[dev]   日志: ${a.logFile}`);
   }
-  console.log(`[dev] ${formatVipLevelStats(prepared)}`);
+  console.log(`[dev] ${formatVipLevelStats(activePrepared)}`);
   console.log('');
 
   // 任意一个账号校准服务器时间（拿到档位开始时间之后）
-  await calibrateClock(prepared[0].client, '[dev] ');
-
-  const span = Math.max(Math.abs(fireRange.min), Math.abs(fireRange.max));
+  await calibrateClock(activePrepared[0].client, '[dev] ');
 
   if (!immediate) {
-    const earliestStart = Math.min(...prepared.map((a) => a.ready.seckillStartTime));
+    const earliestStart = Math.min(...activePrepared.map((a) => a.ready.seckillStartTime));
     const warmAt = earliestStart - warmupBeforeMs;
     // 最早可能开火时刻 = 开抢 + 区间最小值（负数更靠前）
     const wakeAt = earliestStart + fireRange.min;
@@ -197,9 +213,9 @@ async function runMulti(options = {}) {
     }
 
     if (nowMs() < wakeAt + 5000) {
-      console.log(`[dev] >>> 开抢前预热（${prepared.length} 账号）`);
+      console.log(`[dev] >>> 开抢前预热（${activePrepared.length} 账号）`);
       const warmResults = await Promise.all(
-        prepared.map(async (account) => {
+        activePrepared.map(async (account) => {
           try {
             await warmupSession(account, { label: '开抢前预热' });
             return { mobile: account.mobile, ok: true };
@@ -211,31 +227,31 @@ async function runMulti(options = {}) {
         })
       );
       const warmOk = warmResults.filter((r) => r.ok).length;
-      console.log(`[dev] 开抢前预热完成 ${warmOk}/${prepared.length}`);
-      const alive = prepared.find((a) => !a._warmupFailed);
+      console.log(`[dev] 开抢前预热完成 ${warmOk}/${activePrepared.length}`);
+      const alive = activePrepared.find((a) => !a._warmupFailed);
       if (alive) await calibrateClock(alive.client, '[dev] ');
     }
 
-    const preFire = prepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
-    const xsrfAt = wakeAt - Math.max(1500, span + 500);
-    if (preFire.length && nowMs() < xsrfAt) {
-      await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
-    }
-    if (preFire.length) {
+    const preFire = activePrepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
+    if (preFire.length && acquireWarmupMs > 0) {
+      console.log(`[dev] >>> 开抢前 acquire 接口预热（${preFire.length} 账号，${acquireWarmupMs}ms 前）`);
       await Promise.all(
         preFire.map(async (account) => {
-          try {
-            await ensureXsrf(account.client, account.jar);
-          } catch (e) {
-            console.warn(`[dev] ${account.mobile} 预刷 XSRF 失败: ${e.message || e}`);
-          }
+          const fireAt = account.ready.seckillStartTime + (account.fireOffsetMs || 0);
+          await runAcquireConnectionWarmup(account, fireAt, options);
         })
       );
     }
 
+    if (preFire.length) {
+      for (const account of preFire) {
+        bindPreparedAcquire(account);
+      }
+    }
+
     if (nowMs() < wakeAt) {
       console.log(
-        `[dev] 已预刷 XSRF，最早开火约 ${formatLeft(wakeAt - nowMs())} 后（区间 ${formatFireRangeLabel(
+        `[dev] 最早开火约 ${formatLeft(wakeAt - nowMs())} 后（区间 ${formatFireRangeLabel(
           fireRange
         )}）；末 ${COUNTDOWN_LAST_MS / 1000}s 毫秒倒计时`
       );
@@ -243,24 +259,24 @@ async function runMulti(options = {}) {
     }
   } else {
     const scheduledAt = resolveTestFireAt(options, nowMs());
-    const earliestFire = scheduledAt + fireRange.min;
     const schedText = new Date(scheduledAt).toLocaleString('zh-CN', { hour12: false });
-    const preFire = prepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
-    const xsrfAt = earliestFire - Math.max(1500, span + 500);
-    if (preFire.length && nowMs() < xsrfAt) {
-      await waitUntilServer(xsrfAt, { label: '等待刷XSRF' });
+    const preFire = activePrepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
+    if (preFire.length && acquireWarmupMs > 0) {
+      console.log(`[dev] >>> 测试模式 acquire 接口预热（${preFire.length} 账号）`);
+      await Promise.all(
+        preFire.map(async (account) => {
+          const fireAt = scheduledAt + (account.fireOffsetMs || 0);
+          await runAcquireConnectionWarmup(account, fireAt, options);
+        })
+      );
     }
-    await Promise.all(
-      preFire.map(async (account) => {
-        try {
-          await ensureXsrf(account.client, account.jar);
-        } catch (e) {
-          console.warn(`[dev] ${account.mobile} 预刷 XSRF 失败: ${e.message || e}`);
-        }
-      })
-    );
+    if (preFire.length) {
+      for (const account of preFire) {
+        bindPreparedAcquire(account);
+      }
+    }
     // 记下测试目标时刻，各账号按自己的偏移等待
-    for (const a of prepared) {
+    for (const a of activePrepared) {
       a._testScheduledAt = scheduledAt;
     }
     console.log(
@@ -270,8 +286,8 @@ async function runMulti(options = {}) {
     );
   }
 
-  const toFire = prepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
-  const skipped = prepared.filter((a) => a.alreadyAcquired || a._warmupFailed);
+  const toFire = activePrepared.filter((a) => !a.alreadyAcquired && !a._warmupFailed);
+  const skipped = activePrepared.filter((a) => a.alreadyAcquired || a._warmupFailed);
   for (const a of skipped) {
     console.log(
       `[dev] 跳过 ${a.mobile}: ${a.alreadyAcquired ? '本场已领取' : '开抢前预热失败'}`
@@ -305,6 +321,9 @@ async function runMulti(options = {}) {
           user: account.user,
           accountId: (account.user && account.user.id) || null,
           vipLevel: account.vipLevel,
+          configuredLevel: account.configuredLevel,
+          downgraded: account.downgraded,
+          preparedAcquire: account.preparedAcquire,
           fireOffsetMs,
           fireOffsetLabel: formatFireOffsetLabel(fireOffsetMs),
           fireBaseAt: baseAt,

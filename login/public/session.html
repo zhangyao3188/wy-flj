@@ -118,6 +118,13 @@
       background: linear-gradient(135deg, #12b76a, #039855);
       min-width: 0;
     }
+    button.open-login {
+      background: #fff;
+      color: var(--accent);
+      border: 1px solid #fecdca;
+      flex: 0 0 auto;
+      min-width: 108px;
+    }
     button.extract:disabled {
       opacity: 0.65;
       cursor: wait;
@@ -132,6 +139,7 @@
     <div class="status" id="status">加载中…</div>
     <div class="row">
       <input id="typeBox" type="text" placeholder="先点画面输入框，再在此输入文字" inputmode="text" />
+      <button id="btnOpenLogin" type="button" class="open-login">打开登录框</button>
       <button id="sendType" type="button">输入</button>
       <button id="sendClear" type="button" class="secondary">清空</button>
       <button id="sendEnter" type="button" class="secondary">回车</button>
@@ -144,21 +152,36 @@
   <div class="screen-wrap">
     <img id="frame" alt="登录画面" draggable="false" />
   </div>
-  <p class="tip">账号密码登录后点「提取并入库」。若提示缺手机号，填绑定手机号再提取（密码登录 Cookie 里经常没有手机号）。</p>
+  <p class="tip">若画面只有「请先登录」、点登录无反应，请点「打开登录框」。账号密码登录后点「提取并入库」。</p>
   <script>
     const params = new URLSearchParams(location.search);
     const token = params.get('token');
     const statusEl = document.getElementById('status');
     const frame = document.getElementById('frame');
     const typeBox = document.getElementById('typeBox');
+    let clickBusy = false;
+    let refreshBusy = false;
+
+    function canInteract() {
+      if (frame.naturalWidth > 0 && frame.naturalHeight > 0) return true;
+      statusEl.className = 'status';
+      statusEl.textContent = '画面加载中，请稍候再点击…';
+      return false;
+    }
+
+    async function refreshFrame() {
+      if (refreshBusy || clickBusy) return;
+      refreshBusy = true;
+      try {
+        frame.src = '/api/login/session/' + token + '/frame?t=' + Date.now();
+      } finally {
+        refreshBusy = false;
+      }
+    }
 
     if (!token) {
       statusEl.className = 'status err';
       statusEl.textContent = '缺少 token';
-    }
-
-    function refreshFrame() {
-      frame.src = '/api/login/session/' + token + '/frame?t=' + Date.now();
     }
 
     function mapPoint(ev) {
@@ -211,10 +234,13 @@
     }
 
     async function sendClick(ev) {
+      if (clickBusy) return;
+      if (!canInteract()) return;
       ev.preventDefault();
       ev.stopPropagation();
       const src = ev.changedTouches ? ev.changedTouches[0] : ev;
       const { x, y } = mapPoint(src);
+      clickBusy = true;
       statusEl.className = 'status';
       statusEl.textContent = '点击中… (' + x + ', ' + y + ')';
       try {
@@ -231,8 +257,35 @@
       } catch (e) {
         statusEl.className = 'status err';
         statusEl.textContent = e.message || String(e);
+      } finally {
+        clickBusy = false;
+        refreshFrame();
       }
-      refreshFrame();
+    }
+
+    async function openLoginDialog() {
+      if (clickBusy) return;
+      clickBusy = true;
+      statusEl.className = 'status';
+      statusEl.textContent = '正在打开登录框…';
+      try {
+        const res = await fetch('/api/login/session/' + token + '/input', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'open-login' }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          throw new Error(data.message || '打开登录框失败');
+        }
+        statusEl.textContent = '登录框已打开，请在画面中完成登录';
+      } catch (e) {
+        statusEl.className = 'status err';
+        statusEl.textContent = e.message || String(e);
+      } finally {
+        clickBusy = false;
+        refreshFrame();
+      }
     }
 
     // 只用 pointerup，避免 touchend + click 各触发一次导致焦点被立刻点丢
@@ -274,6 +327,7 @@
       refreshFrame();
     }
 
+    document.getElementById('btnOpenLogin').addEventListener('click', openLoginDialog);
     document.getElementById('sendType').addEventListener('click', sendType);
     document.getElementById('sendClear').addEventListener('click', sendClear);
     document.getElementById('sendEnter').addEventListener('click', async () => {

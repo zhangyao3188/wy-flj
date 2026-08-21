@@ -157,6 +157,13 @@ function buildUrl(config) {
   return `${base}${url}`;
 }
 
+/** 仅抢购 acquire 请求写入账号日志文件 */
+function isAcquireRequest(config) {
+  if (!config) return false;
+  const url = buildUrl(config);
+  return /\/week-coupon\/acquire(?:\?|$|\/)/i.test(url);
+}
+
 /** 校准后的服务器时间戳 → 精确到毫秒的可读字符串 */
 function formatServerTime(ms) {
   const t = Number(ms);
@@ -171,8 +178,24 @@ function formatServerTime(ms) {
   );
 }
 
+/** 日志中展示当前抢购等级 */
+function formatSeckillLevelLine(meta = {}) {
+  const level = normalizeLevel(meta.seckillLevel || meta.vipLevel);
+  if (!level) return null;
+  const configured = normalizeLevel(meta.configuredLevel);
+  if (meta.downgraded && configured && configured !== level) {
+    return `[抢购等级] ${level}（配置${configured}，福利降级）`;
+  }
+  if (configured && configured !== level) {
+    return `[抢购等级] ${level}（配置${configured}）`;
+  }
+  return `[抢购等级] ${level}`;
+}
+
 function logHttpExchange(writer, config, response, error) {
-  if (!writer) return;
+  if (!writer || !isAcquireRequest(config)) return;
+  const meta = (config && config.metadata) || {};
+  if (meta.warmupAcquire) return;
   const sep = '============================================================';
   const startAt =
     (config && config.metadata && config.metadata.startAt) != null
@@ -187,7 +210,6 @@ function logHttpExchange(writer, config, response, error) {
     body: config ? parseBody(config.data) : null,
   };
   const headers = formatHeaders(config && config.headers);
-  const meta = (config && config.metadata) || {};
   let result;
   if (error && !response) {
     result = {
@@ -205,6 +227,7 @@ function logHttpExchange(writer, config, response, error) {
   writer.write(
     [
       sep,
+      formatSeckillLevelLine(meta),
       meta.fireOffsetLabel
         ? `[开火偏移] ${meta.fireOffsetLabel}${
             meta.fireOffsetMs != null
@@ -569,6 +592,114 @@ function pickTargetByVip(listResult, vipLevel, nowMsArg = nowMs()) {
   };
 }
 
+/** 列表中是否存在该等级的可抢商品 */
+function levelHasCandidates(listResult, vipLevel) {
+  return collectLevelCandidates(listResult, normalizeLevel(vipLevel)).length > 0;
+}
+
+/**
+ * 解析实际抢购档位（不回写库）
+ * 1. 配置等级可匹配 → 正常抢购
+ * 2. 同账号其他配置等级可匹配 → 跳过本任务
+ * 3. 向下降级至 V1（福利抢购，不计配置等级成功次数）
+ */
+function resolveSeckillLevel(
+  configuredLevel,
+  listResult,
+  allConfiguredLevels = [],
+  { isHighestConfiguredTask = true } = {}
+) {
+  const configured = normalizeLevel(configuredLevel);
+  if (!configured) {
+    return { ok: false, reason: '无效配置等级' };
+  }
+
+  const configuredSet = new Set(
+    (allConfiguredLevels.length ? allConfiguredLevels : [configured])
+      .map((l) => normalizeLevel(l))
+      .filter(Boolean)
+  );
+  configuredSet.add(configured);
+
+  if (levelHasCandidates(listResult, configured)) {
+    return {
+      ok: true,
+      skip: false,
+      downgraded: false,
+      level: configured,
+      configuredLevel: configured,
+      reason: `使用配置等级 ${configured}`,
+    };
+  }
+
+  const otherConfiguredAvailable = [...configuredSet]
+    .filter((l) => l !== configured && levelHasCandidates(listResult, l))
+    .sort((a, b) => levelRank(b) - levelRank(a));
+  if (otherConfiguredAvailable.length) {
+    return {
+      ok: true,
+      skip: true,
+      downgraded: false,
+      level: otherConfiguredAvailable[0],
+      configuredLevel: configured,
+      reason: `配置等级 ${configured} 下架，改由已配置等级 ${otherConfiguredAvailable[0]} 任务抢购`,
+    };
+  }
+
+  if (!isHighestConfiguredTask) {
+    return {
+      ok: true,
+      skip: true,
+      downgraded: false,
+      configuredLevel: configured,
+      reason: `配置等级 ${configured} 下架，改由更高配置等级任务负责福利降级`,
+    };
+  }
+
+  for (let r = levelRank(configured) - 1; r >= 1; r--) {
+    const tryLevel = `V${r}`;
+    if (levelHasCandidates(listResult, tryLevel)) {
+      return {
+        ok: true,
+        skip: false,
+        downgraded: true,
+        level: tryLevel,
+        configuredLevel: configured,
+        reason: `配置等级 ${configured} 下架，福利降级抢购 ${tryLevel}`,
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    reason: `配置等级 ${configured} 下架且无可用降级档位`,
+  };
+}
+
+/**
+ * 为账号×等级任务补充同账号全部配置等级、是否最高档任务
+ */
+function annotateSeckillJobs(jobs) {
+  if (!jobs || !jobs.length) return jobs;
+  const byMobile = new Map();
+  for (const job of jobs) {
+    if (!byMobile.has(job.mobile)) byMobile.set(job.mobile, []);
+    byMobile.get(job.mobile).push(job);
+  }
+  for (const group of byMobile.values()) {
+    const levels = group
+      .map((j) => normalizeLevel(j.forceVipLevel || j.vipLevel))
+      .filter(Boolean);
+    const maxRank = Math.max(0, ...levels.map((l) => levelRank(l)));
+    for (const job of group) {
+      job.allConfiguredLevels = levels;
+      const rank = levelRank(job.forceVipLevel || job.vipLevel);
+      job.isHighestConfiguredTask = rank >= maxRank;
+    }
+  }
+  return jobs;
+}
+
 /**
  * 开抢后刷新列表，按 couponId + seckillStartTime 找回同一场次并补齐 stockId
  */
@@ -590,20 +721,31 @@ async function fetchShowingList(client) {
   return res.data;
 }
 
-async function acquire(client, { couponId, stockId, fireMeta } = {}) {
-  const config = {};
-  if (fireMeta && typeof fireMeta === 'object') {
-    config.metadata = { ...fireMeta };
-  }
-  const res = await client.post(
-    `${INF}/v1/web/exp/week-coupon/acquire`,
-    {
-      couponId,
-      stockId,
+async function acquire(client, { couponId, stockId, fireMeta, body: presetBody } = {}) {
+  const config = {
+    metadata: {
+      ...(fireMeta && typeof fireMeta === 'object' ? fireMeta : {}),
+      seckillLog: !(fireMeta && fireMeta.warmupAcquire),
     },
-    config
-  );
+  };
+  const body =
+    presetBody && typeof presetBody === 'object'
+      ? presetBody
+      : {
+          couponId,
+          stockId,
+        };
+  const res = await client.post(`${INF}/v1/web/exp/week-coupon/acquire`, body, config);
   return res.data;
+}
+
+/** 预组装 acquire 请求体（开抢前调用，到点直接发送） */
+function prepareAcquirePayload(ready) {
+  if (!ready) return null;
+  return {
+    couponId: ready.couponId,
+    stockId: ready.stockId,
+  };
 }
 
 /**
@@ -717,10 +859,14 @@ module.exports = {
   parseCurrentLv,
   resolveMaxVipLevel,
   levelRank,
+  levelHasCandidates,
+  resolveSeckillLevel,
+  annotateSeckillJobs,
   pickTargetByVip,
   findSamePeriod,
   fetchShowingList,
   acquire,
+  prepareAcquirePayload,
   fetchActInfo,
   fetchActAccount,
   syncServerTime,

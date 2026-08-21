@@ -216,7 +216,8 @@ async function attachTodaySuccessCounts(users) {
     rows = await db.query(
       `SELECT account_id,
               COUNT(*) AS cnt,
-              SUM(CASE WHEN kind = 'suspected' THEN 1 ELSE 0 END) AS suspected_cnt
+              SUM(CASE WHEN kind = 'suspected' THEN 1 ELSE 0 END) AS suspected_cnt,
+              SUM(CASE WHEN kind = 'welfare' THEN 1 ELSE 0 END) AS welfare_cnt
        FROM seckill_success_logs
        WHERE account_id IN (${placeholders})
          AND success_at >= ? AND success_at < ?
@@ -228,13 +229,16 @@ async function attachTodaySuccessCounts(users) {
   }
   const countMap = new Map();
   const suspectedMap = new Map();
+  const welfareMap = new Map();
   for (const r of rows) {
     countMap.set(Number(r.account_id), Number(r.cnt) || 0);
     suspectedMap.set(Number(r.account_id), Number(r.suspected_cnt) || 0);
+    welfareMap.set(Number(r.account_id), Number(r.welfare_cnt) || 0);
   }
   for (const u of users) {
     u.todaySuccessCount = countMap.get(Number(u.id)) || 0;
     u.todaySuspectedCount = suspectedMap.get(Number(u.id)) || 0;
+    u.todayWelfareCount = welfareMap.get(Number(u.id)) || 0;
   }
   return users;
 }
@@ -253,9 +257,17 @@ async function listSuccessLogs({ day = null, limit = 500 } = {}) {
             a.buyer_nickname,
             a.act_account,
             a.nickname,
-            a.vip_level AS account_vip_level
+            a.vip_level AS account_vip_level,
+            lv.success_count AS level_success_count,
+            lv.target_count AS level_target_count
      FROM seckill_success_logs l
      LEFT JOIN accounts a ON a.id = l.account_id
+     LEFT JOIN account_seckill_levels lv
+       ON lv.vip_level <=> l.vip_level
+       AND (
+         (l.account_id IS NOT NULL AND lv.account_id = l.account_id)
+         OR (l.account_id IS NULL AND l.mobile IS NOT NULL AND lv.mobile = l.mobile)
+       )
      WHERE l.success_at >= ? AND l.success_at < ?
      ORDER BY l.success_at DESC
      LIMIT ${lim}`,
@@ -278,6 +290,10 @@ async function listSuccessLogs({ day = null, limit = 500 } = {}) {
       actAccount: r.act_account || null,
       nickname: r.nickname || null,
       accountVipLevel: r.account_vip_level || null,
+      successCount:
+        r.level_success_count != null ? Number(r.level_success_count) : null,
+      targetCount:
+        r.level_target_count != null ? Number(r.level_target_count) : null,
     })),
   };
 }
@@ -895,6 +911,7 @@ function toPublicAccount(user) {
     targetCount: user.targetCount || 1,
     todaySuccessCount: Number(user.todaySuccessCount) || 0,
     todaySuspectedCount: Number(user.todaySuspectedCount) || 0,
+    todayWelfareCount: Number(user.todayWelfareCount) || 0,
     lastSuccessAt: user.lastSuccessAt || null,
     completed:
       levels.length > 0

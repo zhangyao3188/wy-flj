@@ -101,6 +101,16 @@ app.post('/api/login/session/:token/input', async (req, res) => {
     else if (type === 'type') await remote.type(text || '', { replace: req.body.replace !== false });
     else if (type === 'clear') await remote.clear();
     else if (type === 'press') await remote.press(key || 'Enter');
+    else if (type === 'open-login') {
+      let ok = false;
+      for (let i = 0; i < 3 && !ok; i++) {
+        ok = await remote.openLoginDialog();
+        if (!ok) await new Promise((r) => setTimeout(r, 500));
+      }
+      if (!ok) {
+        return res.status(400).json({ ok: false, message: '未能打开登录弹窗，请稍后重试或刷新页面' });
+      }
+    }
     else return res.status(400).json({ ok: false, message: '未知操作' });
     res.json({ ok: true });
   } catch (e) {
@@ -290,6 +300,10 @@ app.get('/api/accounts', async (req, res) => {
       (sum, a) => sum + (Number(a.todaySuspectedCount) || 0),
       0
     );
+    const todayWelfareOrders = accounts.reduce(
+      (sum, a) => sum + (Number(a.todayWelfareCount) || 0),
+      0
+    );
     const todaySuccessAccounts = accounts.filter((a) => (a.todaySuccessCount || 0) > 0).length;
     res.json({
       ok: true,
@@ -297,6 +311,7 @@ app.get('/api/accounts', async (req, res) => {
       vipStats,
       todaySuccessOrders,
       todaySuspectedOrders,
+      todayWelfareOrders,
       todaySuccessAccounts,
       today: accountRepo.chinaDayRange().day,
       accounts,

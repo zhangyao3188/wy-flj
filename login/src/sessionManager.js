@@ -140,6 +140,178 @@ class RemoteLoginSession {
     this.viewport = { width: 1100, height: 800 };
     this._closed = false;
     this._watchTimer = null;
+    this._frameBusy = false;
+  }
+
+  async _frameHasVisibleLoginForm(frame) {
+    try {
+      const inputs = frame.locator(
+        'input[type="tel"], input[type="password"], input[type="text"], input[placeholder*="手机"], input[name*="mobile"]'
+      );
+      const count = await inputs.count();
+      for (let i = 0; i < count; i++) {
+        if (await inputs.nth(i).isVisible()) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  async _isLoginDialogVisible() {
+    if (!this.page) return false;
+    try {
+      for (const frame of this.page.frames()) {
+        if (frame === this.page.mainFrame()) continue;
+        try {
+          const frameEl = frame.frameElement();
+          if (frameEl) {
+            const visible = await frameEl.isVisible();
+            const box = await frameEl.boundingBox();
+            if (!visible || !box || box.width < 120 || box.height < 80) continue;
+          }
+        } catch (_) {
+          continue;
+        }
+        if (await this._frameHasVisibleLoginForm(frame)) return true;
+      }
+      if (await this._frameHasVisibleLoginForm(this.page.mainFrame())) return true;
+      return await this.page.evaluate(() => {
+        const isVisible = (el) => {
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          const st = getComputedStyle(el);
+          return (
+            r.width > 120 &&
+            r.height > 80 &&
+            st.visibility !== 'hidden' &&
+            st.display !== 'none' &&
+            Number(st.opacity || 1) > 0.05
+          );
+        };
+        for (const iframe of document.querySelectorAll('iframe')) {
+          if (isVisible(iframe)) return true;
+        }
+        return false;
+      });
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async _isLoginButtonAt(cx, cy) {
+    try {
+      return await this.page.evaluate(
+        ({ x, y }) => {
+          const norm = (s) => String(s || '').replace(/\s+/g, '');
+          const isLoginBtn = (el) => {
+            if (!el || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return false;
+            const t = norm(el.innerText || el.textContent);
+            if (t !== '登录' && t !== '立即登录') return false;
+            const r = el.getBoundingClientRect();
+            if (r.width < 20 || r.height < 10) return false;
+            const st = getComputedStyle(el);
+            return st.display !== 'none' && st.visibility !== 'hidden' && Number(st.opacity || 1) > 0.1;
+          };
+          let el = document.elementFromPoint(x, y);
+          for (let i = 0; i < 6 && el; i++) {
+            if (isLoginBtn(el)) return true;
+            el = el.parentElement;
+          }
+          return false;
+        },
+        { x: cx, y: cy }
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /** 尽量弹出 URS 登录框（主文档 + iframe 多策略） */
+  async openLoginDialog() {
+    if (!this.page || this._closed) return false;
+    if (await this._isLoginDialogVisible()) return true;
+
+    const tryClickLogin = async () => {
+      const strategies = [
+        () =>
+          this.page.getByRole('button', { name: '登录', exact: true }).first().click({
+            timeout: 3000,
+            force: true,
+          }),
+        () =>
+          this.page.locator('button:text-is("登录")').first().click({ timeout: 3000, force: true }),
+        () => this.page.locator('a:text-is("登录")').first().click({ timeout: 3000, force: true }),
+        () =>
+          this.page.locator('.loginBtn, [class*="loginBtn"], [class*="login-btn"]').first().click({
+            timeout: 3000,
+            force: true,
+          }),
+        () =>
+          this.page
+            .getByText('登录', { exact: true })
+            .filter({ hasNotText: '退出' })
+            .first()
+            .click({ timeout: 3000, force: true }),
+      ];
+      for (const run of strategies) {
+        try {
+          await run();
+          await this.page.waitForTimeout(800);
+          if (await this._isLoginDialogVisible()) return true;
+        } catch (_) {}
+      }
+
+      try {
+        const clicked = await this.page.evaluate(() => {
+          const labels = ['登录', '立即登录'];
+          const matchText = (el) => {
+            const t = (el.innerText || el.textContent || '').replace(/\s+/g, '');
+            return labels.some((x) => t === x);
+          };
+          const nodes = document.querySelectorAll('button, a, span, div, p');
+          for (const el of nodes) {
+            if (!matchText(el)) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width < 24 || r.height < 12) continue;
+            const st = getComputedStyle(el);
+            if (st.display === 'none' || st.visibility === 'hidden') continue;
+            el.scrollIntoView({ block: 'center', inline: 'center' });
+            el.click();
+            return true;
+          }
+          return false;
+        });
+        if (clicked) await this.page.waitForTimeout(900);
+      } catch (_) {}
+
+      try {
+        await this.page.waitForFunction(
+          () => {
+            for (const iframe of document.querySelectorAll('iframe')) {
+              const r = iframe.getBoundingClientRect();
+              const st = getComputedStyle(iframe);
+              if (
+                r.width > 120 &&
+                r.height > 80 &&
+                st.display !== 'none' &&
+                st.visibility !== 'hidden'
+              ) {
+                return true;
+              }
+            }
+            return false;
+          },
+          { timeout: 4000 }
+        );
+      } catch (_) {}
+
+      return this._isLoginDialogVisible();
+    };
+
+    for (let i = 0; i < 3; i++) {
+      if (await tryClickLogin()) return true;
+      await this.page.waitForTimeout(600);
+    }
+    return false;
   }
 
   async start() {
@@ -167,17 +339,19 @@ class RemoteLoginSession {
     this.message = '请在下方画面中完成登录（网页版：手机号 / 验证码 / 账号密码 / 滑块）';
 
     await this.page.goto('https://pay.ds.163.com/login', {
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'networkidle',
       timeout: 60000,
+    }).catch(async () => {
+      await this.page.goto('https://pay.ds.163.com/login', {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+      });
     });
-    await this.page.waitForTimeout(800);
-    await this._clickFirst([
-      'text=登录',
-      'text=立即登录',
-      'button:has-text("登录")',
-      '.loginBtn',
-    ]);
-    await this.page.waitForTimeout(600);
+    await this.page.waitForTimeout(1500);
+    for (let i = 0; i < 5; i++) {
+      if (await this.openLoginDialog()) break;
+      await this.page.waitForTimeout(800);
+    }
     // 尽量把登录框滚到可视区域中心
     try {
       await this.page.evaluate(() => {
@@ -208,14 +382,20 @@ class RemoteLoginSession {
   }
 
   async refreshFrame() {
-    if (!this.page || this._closed) return null;
-    // scale: 'css' 保证截图像素 = viewport，与 mouse/touch 坐标一致
-    this.lastFrame = await this.page.screenshot({
-      type: 'jpeg',
-      quality: 70,
-      scale: 'css',
-    });
-    return this.lastFrame;
+    if (!this.page || this._closed) return this.lastFrame;
+    if (this._frameBusy) return this.lastFrame;
+    this._frameBusy = true;
+    try {
+      // scale: 'css' 保证截图像素 = viewport，与 mouse/touch 坐标一致
+      this.lastFrame = await this.page.screenshot({
+        type: 'jpeg',
+        quality: 70,
+        scale: 'css',
+      });
+      return this.lastFrame;
+    } finally {
+      this._frameBusy = false;
+    }
   }
 
   async click(x, y) {
@@ -223,10 +403,20 @@ class RemoteLoginSession {
     const vp = this.page.viewportSize() || this.viewport;
     const cx = Math.max(0, Math.min(vp.width - 1, Math.round(Number(x) || 0)));
     const cy = Math.max(0, Math.min(vp.height - 1, Math.round(Number(y) || 0)));
-    // 网页版用鼠标点击
+    const onLoginBtn = await this._isLoginButtonAt(cx, cy);
+
+    // iframe 内输入框必须走真实鼠标坐标
     await this.page.mouse.click(cx, cy);
     await this.page.waitForTimeout(180);
-    // 尽量把焦点落到点击处的输入框（含 iframe）
+
+    if (onLoginBtn) {
+      await this.page.waitForTimeout(400);
+      if (!(await this._isLoginDialogVisible())) {
+        await this.openLoginDialog();
+      }
+    }
+
+    // 同域：主文档 / 可访问 iframe 内聚焦
     try {
       await this.page.evaluate(
         ({ x: px, y: py }) => {
@@ -256,12 +446,42 @@ class RemoteLoginSession {
           }
           if (target && typeof target.focus === 'function') {
             target.focus();
-            if (typeof target.click === 'function') target.click();
           }
         },
         { x: cx, y: cy }
       );
     } catch (_) {}
+
+    // 跨域 iframe：用 Playwright frame 坐标聚焦
+    try {
+      for (const frame of this.page.frames()) {
+        if (frame === this.page.mainFrame()) continue;
+        let box = null;
+        try {
+          const frameEl = frame.frameElement();
+          box = frameEl ? await frameEl.boundingBox() : null;
+        } catch (_) {}
+        if (!box) continue;
+        const fx = cx - box.x;
+        const fy = cy - box.y;
+        if (fx < 0 || fy < 0 || fx > box.width || fy > box.height) continue;
+        const focused = await frame.evaluate(({ x, y }) => {
+          const el = document.elementFromPoint(x, y);
+          if (!el) return false;
+          const target =
+            el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
+              ? el
+              : el.closest && el.closest('input, textarea, [contenteditable="true"]');
+          if (target && typeof target.focus === 'function') {
+            target.focus();
+            return true;
+          }
+          return false;
+        }, { x: fx, y: fy });
+        if (focused) break;
+      }
+    } catch (_) {}
+
     await this.refreshFrame();
   }
 

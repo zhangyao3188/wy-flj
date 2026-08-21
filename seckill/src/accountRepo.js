@@ -337,8 +337,35 @@ async function incrementSuccessCount(mobile, vipLevel = null, meta = {}) {
   return successCount;
 }
 
+/** 当日是否已有真实成功（confirmed / welfare，不含 suspected） */
+async function hasTodayRealSuccess(accountId, mobile) {
+  const { start, end } = chinaDayRange();
+  try {
+    if (accountId) {
+      const rows = await db.query(
+        `SELECT id FROM seckill_success_logs
+         WHERE account_id = ? AND kind IN ('confirmed', 'welfare')
+           AND success_at >= ? AND success_at < ? LIMIT 1`,
+        [accountId, start, end]
+      );
+      if (rows.length) return true;
+    }
+    if (mobile) {
+      const rows = await db.query(
+        `SELECT id FROM seckill_success_logs
+         WHERE mobile = ? AND kind IN ('confirmed', 'welfare')
+           AND success_at >= ? AND success_at < ? LIMIT 1`,
+        [String(mobile), start, end]
+      );
+      if (rows.length) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
 /**
  * 疑似成功（809 已领取过本轮福利金）：不写 success_count，仅记入当日成功日志
+ * 当日已有真实成功（confirmed/welfare）则不再记疑似
  * @returns {Promise<boolean>} 是否新写入
  */
 async function recordSuspectedSuccess(mobile, vipLevel = null, meta = {}) {
@@ -349,6 +376,13 @@ async function recordSuspectedSuccess(mobile, vipLevel = null, meta = {}) {
   if (!accountId && mobile) {
     const user = await findByMobile(mobile);
     if (user) accountId = user.id;
+  }
+
+  if (await hasTodayRealSuccess(accountId, mobile)) {
+    console.log(
+      `[accountRepo] 当日已有真实成功，跳过疑似成功 mobile=${mobile || ''} level=${level || ''}`
+    );
+    return false;
   }
 
   const { start, end } = chinaDayRange();
@@ -385,6 +419,66 @@ async function recordSuspectedSuccess(mobile, vipLevel = null, meta = {}) {
     return true;
   } catch (e) {
     console.warn(`[accountRepo] 写入疑似成功日志失败: ${e.message || e}`);
+    return false;
+  }
+}
+
+async function recordWelfareSuccess(
+  mobile,
+  configuredLevel = null,
+  actualLevel = null,
+  meta = {}
+) {
+  await ensureAccountColumns();
+  const configured = normalizeVipLevel(configuredLevel);
+  const actual = normalizeVipLevel(actualLevel) || normalizeVipLevel(meta.actualLevel);
+  const now = new Date();
+  let accountId = meta.accountId != null ? Number(meta.accountId) : null;
+  if (!accountId && mobile) {
+    const user = await findByMobile(mobile);
+    if (user) accountId = user.id;
+  }
+
+  const note =
+    meta.note ||
+    (actual
+      ? `福利${actual}等级抢购成功${configured && configured !== actual ? `（配置${configured}下架）` : ''}`
+      : '福利等级抢购成功');
+
+  const { start, end } = chinaDayRange();
+  try {
+    const dupSql = accountId
+      ? `SELECT id FROM seckill_success_logs
+         WHERE account_id = ? AND vip_level <=> ? AND kind = 'welfare'
+           AND success_at >= ? AND success_at < ? LIMIT 1`
+      : `SELECT id FROM seckill_success_logs
+         WHERE mobile = ? AND vip_level <=> ? AND kind = 'welfare'
+           AND success_at >= ? AND success_at < ? LIMIT 1`;
+    const dupParams = accountId
+      ? [accountId, actual || null, start, end]
+      : [String(mobile), actual || null, start, end];
+    const existing = await db.query(dupSql, dupParams);
+    if (existing.length) return false;
+  } catch (_) {}
+
+  try {
+    await db.query(
+      `INSERT INTO seckill_success_logs
+        (account_id, mobile, vip_level, coupon_id, stock_id, success_at, kind, note)
+       VALUES (?, ?, ?, ?, ?, ?, 'welfare', ?)`,
+      [
+        accountId || null,
+        mobile ? String(mobile) : null,
+        actual || null,
+        meta.couponId ? String(meta.couponId).slice(0, 128) : null,
+        meta.stockId ? String(meta.stockId).slice(0, 256) : null,
+        now,
+        note.slice(0, 256),
+      ]
+    );
+    return true;
+  } catch (e) {
+    console.warn(`[accountRepo] 写入福利成功日志失败: ${e.message || e}`);
     return false;
   }
 }
@@ -517,6 +611,7 @@ module.exports = {
   updateActAccount,
   incrementSuccessCount,
   recordSuspectedSuccess,
+  recordWelfareSuccess,
   ensureSuccessCountColumn,
   ensureAccountColumns,
   normalizeTargetCount,
