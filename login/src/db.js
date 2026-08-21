@@ -20,7 +20,7 @@ function getConfig() {
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_NAME || 'wy-flj',
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: 20,
     charset: 'utf8mb4',
   };
 }

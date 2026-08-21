@@ -161,7 +161,9 @@ function chinaDayRange(date = new Date()) {
   return { day, start, end };
 }
 
+let successLogSchemaEnsured = false;
 async function ensureSuccessLogSchema() {
+  if (successLogSchemaEnsured) return;
   try {
     await db.query(
       `ALTER TABLE accounts ADD COLUMN last_success_at DATETIME NULL COMMENT '最近一次真实抢购成功时间' AFTER target_count`
@@ -202,6 +204,7 @@ CREATE TABLE IF NOT EXISTS seckill_success_logs (
       `ALTER TABLE seckill_success_logs ADD COLUMN note VARCHAR(256) NULL COMMENT '疑似成功说明' AFTER kind`
     );
   } catch (_) {}
+  successLogSchemaEnsured = true;
 }
 
 async function attachTodaySuccessCounts(users) {
@@ -436,6 +439,102 @@ async function attachLevels(user) {
     ];
   }
   return user;
+}
+
+/** 批量挂载等级，避免 list 接口 N+1 查询 */
+async function attachLevelsBatch(users) {
+  if (!users || !users.length) return users;
+  const ids = users.map((u) => u.id).filter(Boolean);
+  const mobiles = [
+    ...new Set(
+      users
+        .flatMap((u) => {
+          const list = [];
+          if (u.mobile) list.push(String(u.mobile));
+          if (u.id) list.push(`#${u.id}`);
+          return list;
+        })
+        .filter(Boolean)
+    ),
+  ];
+  let rows = [];
+  try {
+    if (ids.length) {
+      const idPh = ids.map(() => '?').join(',');
+      if (mobiles.length) {
+        const mPh = mobiles.map(() => '?').join(',');
+        rows = await db.query(
+          `SELECT * FROM account_seckill_levels
+           WHERE account_id IN (${idPh}) OR mobile IN (${mPh})
+           ORDER BY account_id ASC, id ASC`,
+          [...ids, ...mobiles]
+        );
+      } else {
+        rows = await db.query(
+          `SELECT * FROM account_seckill_levels
+           WHERE account_id IN (${idPh})
+           ORDER BY account_id ASC, id ASC`,
+          [...ids]
+        );
+      }
+    }
+  } catch (_) {
+    rows = [];
+  }
+
+  const byAccount = new Map();
+  const byMobile = new Map();
+  for (const row of rows) {
+    const lv = rowToLevel(row);
+    if (row.account_id) {
+      const aid = Number(row.account_id);
+      if (!byAccount.has(aid)) byAccount.set(aid, []);
+      byAccount.get(aid).push(lv);
+    }
+    if (row.mobile) {
+      const m = String(row.mobile);
+      if (!byMobile.has(m)) byMobile.set(m, []);
+      byMobile.get(m).push(lv);
+    }
+  }
+
+  for (const user of users) {
+    let levels = (user.id && byAccount.get(Number(user.id))) || [];
+    if (!levels.length && user.mobile) {
+      levels = byMobile.get(String(user.mobile)) || [];
+    }
+    if (!levels.length && user.id) {
+      levels = byMobile.get(`#${user.id}`) || [];
+    }
+    // 去重同 vip_level（保留 id 更大的）
+    if (levels.length > 1) {
+      const keep = new Map();
+      for (const lv of levels) {
+        const key = normalizeVipLevel(lv.vipLevel) || lv.vipLevel;
+        const prev = keep.get(key);
+        if (!prev || Number(lv.id || 0) > Number(prev.id || 0)) keep.set(key, lv);
+      }
+      levels = [...keep.values()].sort(
+        (a, b) => levelRank(a.vipLevel) - levelRank(b.vipLevel)
+      );
+    } else {
+      levels = [...levels].sort((a, b) => levelRank(a.vipLevel) - levelRank(b.vipLevel));
+    }
+    user.levels = levels.length
+      ? levels
+      : [
+          {
+            id: null,
+            accountId: user.id,
+            mobile: user.mobile,
+            vipLevel: user.vipLevel || 'V1',
+            successCount: user.successCount || 0,
+            targetCount: user.targetCount || 1,
+            completed: (user.successCount || 0) >= (user.targetCount || 1),
+          },
+        ];
+  }
+  return users;
 }
 
 async function upsertAccount(user) {
@@ -817,7 +916,7 @@ async function listActiveAccounts() {
     'SELECT * FROM accounts WHERE status = 1 ORDER BY updated_at DESC'
   );
   const users = rows.map(rowToUser);
-  for (const u of users) await attachLevels(u);
+  await attachLevelsBatch(users);
   await attachTodaySuccessCounts(users);
   return users;
 }
@@ -827,7 +926,7 @@ async function listAllAccounts() {
   await ensureSuccessLogSchema();
   const rows = await db.query('SELECT * FROM accounts ORDER BY updated_at DESC');
   const users = rows.map(rowToUser);
-  for (const u of users) await attachLevels(u);
+  await attachLevelsBatch(users);
   await attachTodaySuccessCounts(users);
   return users;
 }
@@ -1072,6 +1171,7 @@ async function syncAccountProfile(accountId) {
 /**
  * 用库内 Cookie 调 actInfo，判断账号是否在线
  * 在线依据：result 含 actAccount 或 uid
+ * 优先直接 actInfo；失败再补一轮换票后重试（提速）
  */
 async function checkAccountOnline(accountId) {
   const existing = await findById(accountId);
@@ -1110,23 +1210,19 @@ async function checkAccountOnline(accountId) {
     session.client.defaults.headers.common['GL-Uid'] = existing.godUuid;
   }
 
-  try {
-    await ensureXsrf(session.client, session.jar);
-    await session.client.get(`${C.PAY_API}/api/nlogin`, { params: {} }).catch(() => {});
-    try {
-      await session.client.get(`${C.INF}/v1/web/cooperate/plutus/cookie-exchange`);
-    } catch (_) {}
-    await ensureXsrf(session.client, session.jar);
-
+  const probeActInfo = async () => {
     const actRes = await session.client.post(`${C.INF_ACT}/v1/act-web/module/common/actInfo`, {
       actId: C.ACT_ID,
     });
-    const data = actRes.data || {};
+    return actRes.data || {};
+  };
+
+  const parseOnline = (data) => {
     const code = data.code != null ? Number(data.code) : NaN;
     if (Number.isFinite(code) && code !== 200 && code !== 0) {
       return {
-        ...base,
         online: false,
+        actAccount: null,
         message: `actInfo code=${code} ${data.errmsg || data.msg || ''}`.trim(),
       };
     }
@@ -1138,11 +1234,33 @@ async function checkAccountOnline(accountId) {
       null;
     const uid = result.uid || (result.user && result.user.uid) || null;
     const online = !!(actAccount || uid);
+    return {
+      online,
+      actAccount: actAccount ? String(actAccount) : null,
+      message: online ? '在线' : '离线（actInfo 未返回登录身份）',
+    };
+  };
 
-    if (online && actAccount && String(actAccount).trim()) {
+  try {
+    await ensureXsrf(session.client, session.jar);
+    let data = await probeActInfo();
+    let parsed = parseOnline(data);
+
+    // 未在线时再换票重试一次
+    if (!parsed.online) {
+      await session.client.get(`${C.PAY_API}/api/nlogin`, { params: {} }).catch(() => {});
+      try {
+        await session.client.get(`${C.INF}/v1/web/cooperate/plutus/cookie-exchange`);
+      } catch (_) {}
+      await ensureXsrf(session.client, session.jar);
+      data = await probeActInfo();
+      parsed = parseOnline(data);
+    }
+
+    if (parsed.online && parsed.actAccount && String(parsed.actAccount).trim()) {
       await db
         .query(`UPDATE accounts SET act_account = COALESCE(?, act_account) WHERE id = ?`, [
-          String(actAccount).trim().slice(0, 128),
+          String(parsed.actAccount).trim().slice(0, 128),
           existing.id,
         ])
         .catch(() => {});
@@ -1150,9 +1268,9 @@ async function checkAccountOnline(accountId) {
 
     return {
       ...base,
-      online,
-      actAccount: actAccount ? String(actAccount) : base.actAccount,
-      message: online ? '在线' : '离线（actInfo 未返回登录身份）',
+      online: parsed.online,
+      actAccount: parsed.actAccount || base.actAccount,
+      message: parsed.message,
     };
   } catch (e) {
     return {
@@ -1173,26 +1291,38 @@ function isAccountCompleted(user) {
   return (user.successCount || 0) >= (user.targetCount || 1);
 }
 
-/** 批量验证可用账号在线情况（跳过已全部完成，顺序请求） */
-async function checkAllAccountsOnline({ onProgress } = {}) {
+async function mapPool(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await worker(items[i], i);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
+/** 批量验证可用账号在线情况（跳过已全部完成，有限并发） */
+async function checkAllAccountsOnline({ onProgress, concurrency } = {}) {
   const all = await listAllAccounts();
   const list = all.filter((acc) => !isAccountCompleted(acc));
   const skipped = all.length - list.length;
-  const results = [];
-  let online = 0;
-  let offline = 0;
-  for (let i = 0; i < list.length; i++) {
-    const acc = list[i];
+  const limit = Math.max(1, Math.min(Number(concurrency) || 6, 12));
+  let done = 0;
+  const results = await mapPool(list, limit, async (acc) => {
     const r = await checkAccountOnline(acc.id);
-    if (r.online) online += 1;
-    else offline += 1;
-    results.push(r);
+    done += 1;
     if (typeof onProgress === 'function') {
       try {
-        onProgress({ index: i + 1, total: list.length, result: r });
+        onProgress({ index: done, total: list.length, result: r });
       } catch (_) {}
     }
-  }
+    return r;
+  });
+  const online = results.filter((r) => r && r.online).length;
+  const offline = results.length - online;
   return {
     total: list.length,
     skipped,

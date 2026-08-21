@@ -353,6 +353,29 @@ app.post('/api/accounts/check-online', async (_req, res) => {
   }
 });
 
+/** 单个账号验证在线 */
+app.post('/api/accounts/:id/check-online', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id < 1) {
+      return res.status(400).json({ ok: false, message: '无效账号 id' });
+    }
+    const result = await accountRepo.checkAccountOnline(id);
+    res.json({
+      ok: true,
+      message: result.message || (result.online ? '在线' : '离线'),
+      result,
+      results: [result],
+      online: result.online ? 1 : 0,
+      offline: result.online ? 0 : 1,
+      total: 1,
+    });
+  } catch (e) {
+    console.error('[login] check-online one failed:', e.message || e);
+    res.status(500).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
 app.get('/api/accounts/:id', async (req, res) => {
   try {
     const user = await accountRepo.findById(req.params.id);
