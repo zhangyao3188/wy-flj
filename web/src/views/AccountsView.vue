@@ -368,11 +368,17 @@ async function onDelLevel(account, level) {
   }).catch((e) => ElMessage.error(e.message || String(e)))
 }
 
+function accountDisplayName(row) {
+  const name = String(row?.buyerNickname || '').trim()
+  return name || row?.mobile || '该账号'
+}
+
 async function onDelAccount(row) {
   const key = `del:${row.id}`
   if (isBusy(key)) return
+  const label = accountDisplayName(row)
   try {
-    await ElMessageBox.confirm(`确认删除账号 ${row.mobile}？此操作不可恢复。`, '危险操作', {
+    await ElMessageBox.confirm(`确认删除账号「${label}」？此操作不可恢复。`, '危险操作', {
       type: 'warning',
       confirmButtonClass: 'el-button--danger',
     })
@@ -381,7 +387,7 @@ async function onDelAccount(row) {
   }
   await withBusy(key, async () => {
     await deleteAccount(row.id)
-    ElMessage.success(`已删除 ${row.mobile}`)
+    ElMessage.success(`已删除 ${label}`)
     await loadAccounts()
   }).catch((e) => ElMessage.error(e.message || String(e)))
 }

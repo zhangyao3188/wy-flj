@@ -724,6 +724,11 @@
       return data;
     }
 
+    function accountDisplayName(acc, mobile) {
+      const name = String(acc?.buyerNickname || '').trim();
+      return name || mobile || '该账号';
+    }
+
     tbody.addEventListener('click', async (ev) => {
       const btn = ev.target.closest('button[data-act]');
       if (!btn) return;
@@ -803,10 +808,12 @@
           return;
         }
         if (act === 'del') {
-          if (!confirm(`确认删除账号 ${mobile}？此操作不可恢复。`)) return;
+          const acc = accountsCache.find((a) => String(a.id) === String(accountId));
+          const label = accountDisplayName(acc, mobile);
+          if (!confirm(`确认删除账号「${label}」？此操作不可恢复。`)) return;
           btn.disabled = true;
           await apiJson(`/api/accounts/${accountId}/delete`, { method: 'POST' });
-          toast(`已删除 ${mobile}`);
+          toast(`已删除 ${label}`);
           await loadAccounts();
         }
       } catch (e) {
