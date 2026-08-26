@@ -14,6 +14,8 @@ function readCookie(jar, name) {
     'https://pay.ds.163.com/',
     'https://pay-api.ds.163.com/',
     'https://inf.ds.163.com/',
+    'https://inf-act.ds.163.com/',
+    'https://act.ds.163.com/',
   ]) {
     try {
       const hit = jar.getCookiesSync(url).find((c) => c.key === name);
@@ -41,7 +43,10 @@ function attachGlHeaders(client, jar, { deviceId }) {
       '';
 
     config.headers = config.headers || {};
-    config.headers['GL-DeviceId'] = deviceId;
+    config.headers['GL-DeviceId'] =
+      client.defaults.headers.common['GL-DeviceId'] ||
+      client.defaults.headers.common['gl-deviceid'] ||
+      deviceId;
     config.headers['GL-ClientType'] = '60';
     if (xsrf) config.headers['GL-X-XSRF-TOKEN'] = xsrf;
     if (uid) {

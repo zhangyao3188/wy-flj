@@ -1,0 +1,64 @@
+{
+  "game": "identity-v",
+  "gameName": "第五人格",
+  "pageAppId": "6c5dff79fefb9cf3",
+  "actId": "681c2ad9522bf029b6fce6d0",
+  "mallActId": "681c2ad9522bf029b6fce6d0",
+  "pageSetId": "65c083d29d2bb100013d3069",
+  "pageUrl": "https://act.ds.163.com/6c5dff79fefb9cf3/65c083d29d2bb100013d3069",
+  "appKey": "h55",
+  "appKeyFallbacks": ["h55", "H55", "l33"],
+  "currencyType": "H55_ticket_ios",
+  "currencyName": "积分",
+  "marketId": "68258cf50b20f30f391d726c",
+  "asType": 10,
+  "roleChannel": "ACT_CENTER_COMMON",
+  "hosts": {
+    "act": "https://act.ds.163.com",
+    "infAct": "https://inf-act.ds.163.com",
+    "payApi": "https://pay-api.ds.163.com",
+    "inf": "https://inf.ds.163.com"
+  },
+  "apis": {
+    "actInfo": "/v1/act-web/module/common/actInfo",
+    "roleListByUrs": "/v1/act-web/module/common/roleListByUrs",
+    "getRoleDetail": "/v1/act-web/module/common/getRoleDetail",
+    "bindRole": "/v1/act-web/module/common/bindRole",
+    "getCurrencyInfo": "/v1/act-web/common/currency/getCurrencyInfo",
+    "getMarketInfo": "/v1/act-web/module/market/getMarketInfo",
+    "getAllExchangeGoodsTab": "/v1/act-web/module/market/getAllExchangeGoodsTab",
+    "getExchangeList": "/v1/act-web/module/market/getExchangeListV2_complexFilter",
+    "getExchangeDetail": "/v1/act-web/module/market/getExchangeDetail",
+    "exchangePrize": "/v1/act-web/module/market/exchangePrize",
+    "commonAppConfig": "/v1/act-web/pageConf/commonAppConfig"
+  },
+  "bodies": {
+    "actInfo": ["actId"],
+    "roleListByUrs": ["appKey", "actId", "channel"],
+    "getRoleDetail": ["appKey", "roleId", "server"],
+    "bindRole": ["appKey", "roleId", "server", "actId"],
+    "getCurrencyInfo": ["currencyType", "actId", "roleInfo"],
+    "getMarketInfo": ["actId", "asId", "asType"],
+    "getAllExchangeGoodsTab": ["actId", "asId", "asType"],
+    "getExchangeList": ["actId", "asId", "asType", "pageSize", "pageNum", "goodsTab"],
+    "getExchangeDetail": ["actId", "asId", "asType", "exchangeId"],
+    "exchangePrize": ["exchangeId", "roleId", "server", "appKey"]
+  },
+  "goodsFields": {
+    "id": ["exchangeId", "goodsId", "id", "prizeId"],
+    "name": ["name", "prizeName", "goodsName", "title"],
+    "price": ["price", "needNum", "currencyNum", "cost"],
+    "stock": ["prizeLeftNum", "remainStock", "leftNum", "stock"],
+    "exchanged": ["haveExchangeCount", "userExchangedNum", "exchangedNum"],
+    "limit": ["uidMaxNum", "limitNum", "userLimit"],
+    "startTime": ["startTime", "exchangeStartTime", "beginTime"],
+    "endTime": ["endTime", "exchangeEndTime"],
+    "image": ["picUrl", "icon", "image", "prizeImg", "goodsImg", "pic"]
+  },
+  "notes": {
+    "listResult": "result.exchangeList",
+    "soldOut": "线上 empty 角标：prizeStatus===2 || prizeLeftNum===0；文案 TOTAL_STOCK_ZERO→已售罄，PERIOD_STOCK_ZERO→周期补货",
+    "alreadyExchanged": "haveExchangeCount(+haveGiveCount)>=uidMaxNum；勿用 canExchange===false（售罄也会 false）",
+    "statusPriority": "sold_out > exchanged > not_started > available"
+  }
+}

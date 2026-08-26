@@ -254,6 +254,78 @@ CREATE TABLE IF NOT EXISTS \`seckill_success_logs\` (
     console.log(`[init-db] migrated ${mig.affectedRows} accounts → account_seckill_levels`);
   }
 
+  await conn.query(`
+CREATE TABLE IF NOT EXISTS \`account_points_tasks\` (
+  \`id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  \`account_id\` BIGINT UNSIGNED NOT NULL,
+  \`mobile\` VARCHAR(32) NULL,
+  \`act_id\` VARCHAR(64) NOT NULL,
+  \`goods_id\` VARCHAR(128) NOT NULL COMMENT 'exchangeId',
+  \`goods_name\` VARCHAR(256) NULL,
+  \`goods_raw\` MEDIUMTEXT NULL,
+  \`role_id\` VARCHAR(64) NULL,
+  \`role_name\` VARCHAR(128) NULL,
+  \`server\` VARCHAR(64) NULL,
+  \`server_name\` VARCHAR(128) NULL,
+  \`app_key\` VARCHAR(32) NULL,
+  \`currency_type\` VARCHAR(64) NULL,
+  \`currency_balance\` INT NULL,
+  \`start_at\` DATETIME NOT NULL COMMENT 'yyyy-mm-dd hh:mm:ss',
+  \`target_count\` INT UNSIGNED NOT NULL DEFAULT 1,
+  \`success_count\` INT UNSIGNED NOT NULL DEFAULT 0,
+  \`last_success_at\` DATETIME NULL,
+  \`status\` TINYINT NOT NULL DEFAULT 1,
+  \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`uk_account_act_goods\` (\`account_id\`, \`act_id\`, \`goods_id\`),
+  KEY \`idx_mobile\` (\`mobile\`),
+  KEY \`idx_status\` (\`status\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`);
+  console.log('[init-db] ensure account_points_tasks');
+  try {
+    const [oldIdx] = await conn.query(
+      `SHOW INDEX FROM account_points_tasks WHERE Key_name = 'uk_account_act'`
+    );
+    if (oldIdx && oldIdx.length) {
+      await conn.query(`ALTER TABLE account_points_tasks DROP INDEX uk_account_act`);
+      console.log('[init-db] dropped uk_account_act');
+    }
+  } catch (_) {}
+  try {
+    const [newIdx] = await conn.query(
+      `SHOW INDEX FROM account_points_tasks WHERE Key_name = 'uk_account_act_goods'`
+    );
+    if (!newIdx || !newIdx.length) {
+      await conn.query(
+        `ALTER TABLE account_points_tasks ADD UNIQUE KEY uk_account_act_goods (account_id, act_id, goods_id)`
+      );
+      console.log('[init-db] added uk_account_act_goods');
+    }
+  } catch (e) {
+    console.warn('[init-db] migrate points unique key:', e.message || e);
+  }
+
+  await conn.query(`
+CREATE TABLE IF NOT EXISTS \`points_seckill_success_logs\` (
+  \`id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  \`account_id\` BIGINT UNSIGNED NULL,
+  \`mobile\` VARCHAR(32) NULL,
+  \`goods_id\` VARCHAR(128) NULL,
+  \`goods_name\` VARCHAR(256) NULL,
+  \`kind\` VARCHAR(16) NOT NULL DEFAULT 'confirmed',
+  \`note\` VARCHAR(256) NULL,
+  \`success_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (\`id\`),
+  KEY \`idx_success_at\` (\`success_at\`),
+  KEY \`idx_account_id\` (\`account_id\`),
+  KEY \`idx_mobile\` (\`mobile\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`);
+  console.log('[init-db] ensure points_seckill_success_logs');
+
   await conn.end();
   console.log(`[init-db] ok, database=${database}`);
 }

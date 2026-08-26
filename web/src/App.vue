@@ -1,13 +1,15 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const title = computed(() => {
   if (route.name === 'accounts') return '账号管理 - 福利金'
+  if (route.name === 'points-mall') return '第五人格积分商城'
   if (route.name === 'session') return '完成登录 - 福利金'
   return '福利金登录'
 })
+watch(title, (t) => { document.title = t }, { immediate: true })
 </script>
 
 <template>
@@ -18,6 +20,7 @@ const title = computed(() => {
         <nav>
           <router-link to="/">登录</router-link>
           <router-link to="/accounts">账号管理</router-link>
+          <router-link to="/points-mall">积分商城</router-link>
         </nav>
       </el-header>
       <el-main :class="{ 'session-main': route.name === 'session' }">

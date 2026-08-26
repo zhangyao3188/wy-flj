@@ -11,6 +11,9 @@ const { SessionManager } = require('./sessionManager');
 const { parseCurlOrCookies } = require('./parseCurl');
 const { createSession } = require('./http');
 const { LoginService } = require('./loginService');
+const pointsMallClient = require('./pointsMallClient');
+const pointsTaskRepo = require('./pointsTaskRepo');
+const { loadConfig: loadPointsConfig, getActId, isSameAct, actIdAliases } = require('./pointsConfig');
 
 const app = express();
 const manager = new SessionManager();
@@ -550,6 +553,226 @@ async function handleDeleteAccount(req, res) {
 app.delete('/api/accounts/:id', handleDeleteAccount);
 /** 兼容部分环境拦截 DELETE：前端优先走此接口 */
 app.post('/api/accounts/:id/delete', handleDeleteAccount);
+
+function publicPointsAccount(account, tasks) {
+  const base = accountRepo.toPublicAccount(account);
+  const list = Array.isArray(tasks) ? tasks.filter(Boolean) : tasks ? [tasks] : [];
+  return {
+    ...base,
+    pointsTasks: list,
+    /** 兼容旧前端：取最近一条 */
+    pointsTask: list[0] || null,
+  };
+}
+
+function publicPointsProfile(profile) {
+  if (!profile) return null;
+  const currency = profile.currency || null;
+  return {
+    actAccount: profile.actAccount || null,
+    currentTime: profile.currentTime || null,
+    appKey: profile.appKey || null,
+    role: profile.role || null,
+    roles: profile.roles || [],
+    actRoleInfo: profile.role
+      ? {
+          roleId: profile.role.roleId,
+          roleName: profile.role.roleName,
+          nick: profile.role.roleName,
+          server: profile.role.server,
+          serverName: profile.role.serverName,
+          appKey: profile.role.appKey,
+        }
+      : null,
+    currency: currency
+      ? {
+          ok: !!currency.ok,
+          balance: currency.balance != null ? currency.balance : null,
+          currencyType: currency.currencyType || null,
+          currencyName: currency.currencyName || null,
+          message: currency.message || null,
+        }
+      : null,
+  };
+}
+
+app.get('/api/points/identity-v/accounts', async (_req, res) => {
+  try {
+    await pointsTaskRepo.ensureTables();
+    const cfg = loadPointsConfig();
+    const list = await accountRepo.listAllAccounts();
+    const tasks = await pointsTaskRepo.listTasks();
+    const byAccount = new Map();
+    for (const t of tasks.filter((t) => isSameAct(t.actId, cfg))) {
+      const aid = Number(t.accountId);
+      if (!byAccount.has(aid)) byAccount.set(aid, []);
+      byAccount.get(aid).push(t);
+    }
+    const accounts = list.map((a) => publicPointsAccount(a, byAccount.get(Number(a.id)) || []));
+    res.json({
+      ok: true,
+      game: cfg.gameName,
+      actId: getActId(cfg),
+      currencyName: cfg.currencyName || '积分',
+      total: accounts.length,
+      accounts,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+app.get('/api/points/identity-v/accounts/:id/profile', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id < 1) {
+      return res.status(400).json({ ok: false, message: '无效账号 id' });
+    }
+    const account = await accountRepo.findById(id);
+    if (!account) return res.status(404).json({ ok: false, message: '账号不存在' });
+    const profile = publicPointsProfile(await pointsMallClient.fetchProfile(account));
+    const cfg = loadPointsConfig();
+    const tasks = await pointsTaskRepo.listTasksByAccountId(id, actIdAliases(cfg));
+    res.json({
+      ok: true,
+      account: publicPointsAccount(account, tasks),
+      profile,
+    });
+  } catch (e) {
+    res.status(400).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+app.get('/api/points/identity-v/accounts/:id/goods', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id < 1) {
+      return res.status(400).json({ ok: false, message: '无效账号 id' });
+    }
+    const account = await accountRepo.findById(id);
+    if (!account) return res.status(404).json({ ok: false, message: '账号不存在' });
+    const listed = await pointsMallClient.fetchGoods(account);
+    res.json({
+      ok: true,
+      goods: listed.goods || [],
+      message: listed.message || null,
+      currentTime: listed.currentTime || null,
+    });
+  } catch (e) {
+    res.status(400).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+app.put('/api/points/identity-v/accounts/:id/task', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id < 1) {
+      return res.status(400).json({ ok: false, message: '无效账号 id' });
+    }
+    const account = await accountRepo.findById(id);
+    if (!account) return res.status(404).json({ ok: false, message: '账号不存在' });
+    const body = req.body || {};
+    const goodsId = String(body.goodsId || body.exchangeId || '').trim();
+    if (!goodsId) return res.status(400).json({ ok: false, message: '请选择商品' });
+    // 开抢时间由 points-seckill/.env 的 POINTS_SECKILL_START_AT 或 test:now 决定，web 不再配置
+    const startAt =
+      body.startAt ||
+      body.start_at ||
+      pointsTaskRepo.formatDateTime(new Date());
+    if (body.targetCount != null && (Number(body.targetCount) < 1 || !Number.isFinite(Number(body.targetCount)))) {
+      return res.status(400).json({ ok: false, message: '抢购次数须为大于等于 1 的整数' });
+    }
+    const cfg = loadPointsConfig();
+    const role = body.role && typeof body.role === 'object' ? body.role : {
+      roleId: body.roleId,
+      roleName: body.roleName,
+      server: body.server,
+      serverName: body.serverName,
+      appKey: body.appKey,
+    };
+    if (role && role.roleId) {
+      await pointsMallClient.bindRole(account, role).catch(() => {});
+    }
+    const task = await pointsTaskRepo.upsertTask({
+      accountId: id,
+      mobile: account.mobile,
+      actId: getActId(cfg),
+      goodsId,
+      goodsName: body.goodsName || null,
+      goodsRaw: body.goods || body.goodsRaw || null,
+      roleId: role && role.roleId,
+      roleName: role && role.roleName,
+      server: role && role.server,
+      serverName: role && role.serverName,
+      appKey: (role && role.appKey) || cfg.appKey,
+      currencyType: body.currencyType || cfg.currencyType,
+      currencyBalance: body.currencyBalance,
+      startAt,
+      targetCount: body.targetCount,
+    });
+    const tasks = await pointsTaskRepo.listTasksByAccountId(id, actIdAliases(cfg));
+    res.json({
+      ok: true,
+      message: '已提交积分抢购任务',
+      task,
+      account: publicPointsAccount(account, tasks),
+    });
+  } catch (e) {
+    res.status(400).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+async function handleDeletePointsTask(req, res) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id < 1) {
+      return res.status(400).json({ ok: false, message: '无效账号 id' });
+    }
+    const account = await accountRepo.findById(id);
+    if (!account) return res.status(404).json({ ok: false, message: '账号不存在' });
+    const cfg = loadPointsConfig();
+    const body = req.body || {};
+    const taskId = body.taskId != null ? Number(body.taskId) : null;
+    const goodsId = body.goodsId ? String(body.goodsId).trim() : null;
+    await pointsTaskRepo.deleteTask({
+      id: Number.isFinite(taskId) && taskId > 0 ? taskId : null,
+      accountId: id,
+      actId: actIdAliases(cfg),
+      goodsId: goodsId || null,
+    });
+    const tasks = await pointsTaskRepo.listTasksByAccountId(id, actIdAliases(cfg));
+    res.json({
+      ok: true,
+      message: '已删除抢购任务',
+      account: publicPointsAccount(account, tasks),
+    });
+  } catch (e) {
+    res.status(400).json({ ok: false, message: e.message || String(e) });
+  }
+}
+
+app.delete('/api/points/identity-v/accounts/:id/task', handleDeletePointsTask);
+app.post('/api/points/identity-v/accounts/:id/task/delete', handleDeletePointsTask);
+
+app.get('/api/points/identity-v/tasks', async (_req, res) => {
+  try {
+    const cfg = loadPointsConfig();
+    const tasks = (await pointsTaskRepo.listTasks()).filter((t) => isSameAct(t.actId, cfg));
+    res.json({ ok: true, tasks });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message || String(e) });
+  }
+});
+
+app.get('/api/points-seckill-success', async (req, res) => {
+  try {
+    const day = req.query.day ? String(req.query.day).trim() : null;
+    const data = await pointsTaskRepo.listSuccessLogs({ day });
+    res.json({ ok: true, ...data });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message || String(e) });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`[login] 在线登录: ${PUBLIC_URL}`);

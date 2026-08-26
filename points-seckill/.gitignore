@@ -1,0 +1,7 @@
+/.env
+/node_modules
+/log/
+/tools/js_cache/
+/tools/captured/
+/tools/page.html
+*.log

@@ -1,0 +1,207 @@
+/v1/act-web/actopen/common/getUniqueKey
+/v1/act-web/common/currency/getCurrencyInfo
+/v1/act-web/common/currency/getSpecialTimeExpireCurrency
+/v1/act-web/common/currency/listCurrencyLog4CommonCoin
+/v1/act-web/floatFrame/addUsedNum
+/v1/act-web/floatFrame/getInfos
+/v1/act-web/module/book/multiBookInfo
+/v1/act-web/module/common/actInfo
+/v1/act-web/module/common/bindRole
+/v1/act-web/module/common/getAccount
+/v1/act-web/module/common/getRoleDetail
+/v1/act-web/module/common/roleListByUrs
+/v1/act-web/module/common/verifyUrsSms
+/v1/act-web/module/helpRechargeMilestone/draw
+/v1/act-web/module/helpRechargeMilestone/info
+/v1/act-web/module/luckDraw/draw
+/v1/act-web/module/luckDraw/drawByCommonCoin
+/v1/act-web/module/luckDraw/getMultiLuckDrawInfo
+/v1/act-web/module/luckDraw/luckDrawInfo
+/v1/act-web/module/luckDraw/multiDraw
+/v1/act-web/module/luckDraw/multiDrawByCommonCoin
+/v1/act-web/module/market/exchangePrize
+/v1/act-web/module/market/getAllExchangeGoodsTab
+/v1/act-web/module/market/getExchangeDetail
+/v1/act-web/module/market/getExchangeListV2_complexFilter
+/v1/act-web/module/market/getMarketInfo
+/v1/act-web/module/seizeTreasure/info
+/v1/act-web/module/seizeTreasure/putIn
+/v1/act-web/module/seizeTreasure/winnersLog
+/v1/act-web/module/signupDraw/signup
+/v1/act-web/module/signupDraw/signupDrawInfos
+/v1/act-web/module/signupDraw/winners
+/v1/act-web/module/task/applyTaskPrize
+/v1/act-web/module/task/doActTask
+/v1/act-web/module/task/doCommonBookTask
+/v1/act-web/module/task/doMultiActTask
+/v1/act-web/module/task/taskInfo
+/v1/act-web/pageConf/commonAppConfig
+/v1/act-web/recharge/getFirstRechargeTime
+/v1/act-web/recharge/mpay/getOperationUrl
+/v1/act-web/welfare/xy/get-recent-rewardBag-list
+/v1/act-web/winPrizeLog/winPrizeList
+/v1/act//module/market/getMarketInfo
+/v1/act/actopen/common/getUniqueKey
+/v1/act/common/currency/getCurrencyInfo
+/v1/act/common/currency/getSpecialTimeExpireCurrency
+/v1/act/common/currency/listCurrencyLog4CommonCoin
+/v1/act/floatFrame/addUsedNum
+/v1/act/floatFrame/getInfos
+/v1/act/module/book/multiBookInfo
+/v1/act/module/common/actInfo
+/v1/act/module/common/bindRole
+/v1/act/module/common/getAccount
+/v1/act/module/common/verifyUrsSms
+/v1/act/module/helpRechargeMilestone/draw
+/v1/act/module/helpRechargeMilestone/info
+/v1/act/module/l33/miniGame/getTodayProcess
+/v1/act/module/l33/miniGame/getToken
+/v1/act/module/luckDraw/draw
+/v1/act/module/luckDraw/drawByCommonCoin
+/v1/act/module/luckDraw/getMultiLuckDrawInfo
+/v1/act/module/luckDraw/luckDrawInfo
+/v1/act/module/luckDraw/multiDraw
+/v1/act/module/luckDraw/multiDrawByCommonCoin
+/v1/act/module/market/exchangePrize
+/v1/act/module/market/getAllExchangeGoodsTab
+/v1/act/module/market/getExchangeDetail
+/v1/act/module/market/getExchangeListV2_complexFilter
+/v1/act/module/seizeTreasure/info
+/v1/act/module/seizeTreasure/putIn
+/v1/act/module/seizeTreasure/winnersLog
+/v1/act/module/signupDraw/signup
+/v1/act/module/signupDraw/signupDrawInfos
+/v1/act/module/signupDraw/winners
+/v1/act/module/task/applyTaskPrize
+/v1/act/module/task/doActTask
+/v1/act/module/task/doCommonBookTask
+/v1/act/module/task/doMultiActTask
+/v1/act/module/task/taskInfo
+/v1/act/pageConf/commonAppConfig
+/v1/act/recharge/getFirstRechargeTime
+/v1/act/recharge/mpay/getOperationUrl
+/v1/act/winPrizeLog/winPrizeList
+/v1/app/gameCenter/gameList/V2
+/v1/app/gameRole/getBindList
+/v1/exp/new-user-coupon/acquire
+/v1/exp/new-user-coupon/check-order-record
+/v1/exp/new-user-coupon/list
+/v1/exp/week-coupon/acquire
+/v1/exp/week-coupon/showing-list-v2
+/v1/exp/xy/coupon-filter-strategy/show
+/v1/exp/xy/game-wchat-config/suggest-list
+/v1/web/exp/new-user-coupon/acquire
+/v1/web/exp/new-user-coupon/check-order-record
+/v1/web/exp/new-user-coupon/list
+/v1/web/exp/square-user/sign-in
+/v1/web/exp/week-coupon/acquire
+/v1/web/exp/week-coupon/showing-list-v2
+/v1/web/exp/xy/coupon-filter-strategy/show
+/v1/web/exp/xy/game-wchat-config/suggest-list
+/v1/web/game/appInfo/getAll
+/v1/web/recharge/config/getSquareWebRechargeConfigList
+/v1/web/role-list-query/getBindList
+/v1/welfare/xy/get-recent-rewardBag-list
+GET /v1/web/recharge/config/getSquareWebRechargeConfigList
+POST /v1/act-web/actopen/common/getUniqueKey
+POST /v1/act-web/common/currency/getCurrencyInfo
+POST /v1/act-web/common/currency/getSpecialTimeExpireCurrency
+POST /v1/act-web/common/currency/listCurrencyLog4CommonCoin
+POST /v1/act-web/floatFrame/addUsedNum
+POST /v1/act-web/floatFrame/getInfos
+POST /v1/act-web/module/book/multiBookInfo
+POST /v1/act-web/module/common/actInfo
+POST /v1/act-web/module/common/bindRole
+POST /v1/act-web/module/common/getAccount
+POST /v1/act-web/module/common/getRoleDetail
+POST /v1/act-web/module/common/roleListByUrs
+POST /v1/act-web/module/common/verifyUrsSms
+POST /v1/act-web/module/helpRechargeMilestone/draw
+POST /v1/act-web/module/helpRechargeMilestone/info
+POST /v1/act-web/module/luckDraw/draw
+POST /v1/act-web/module/luckDraw/drawByCommonCoin
+POST /v1/act-web/module/luckDraw/getMultiLuckDrawInfo
+POST /v1/act-web/module/luckDraw/luckDrawInfo
+POST /v1/act-web/module/luckDraw/multiDraw
+POST /v1/act-web/module/luckDraw/multiDrawByCommonCoin
+POST /v1/act-web/module/market/exchangePrize
+POST /v1/act-web/module/market/getAllExchangeGoodsTab
+POST /v1/act-web/module/market/getExchangeDetail
+POST /v1/act-web/module/market/getExchangeListV2_complexFilter
+POST /v1/act-web/module/market/getMarketInfo
+POST /v1/act-web/module/seizeTreasure/info
+POST /v1/act-web/module/seizeTreasure/putIn
+POST /v1/act-web/module/seizeTreasure/winnersLog
+POST /v1/act-web/module/signupDraw/signup
+POST /v1/act-web/module/signupDraw/signupDrawInfos
+POST /v1/act-web/module/signupDraw/winners
+POST /v1/act-web/module/task/applyTaskPrize
+POST /v1/act-web/module/task/doActTask
+POST /v1/act-web/module/task/doCommonBookTask
+POST /v1/act-web/module/task/doMultiActTask
+POST /v1/act-web/module/task/taskInfo
+POST /v1/act-web/pageConf/commonAppConfig
+POST /v1/act-web/recharge/getFirstRechargeTime
+POST /v1/act-web/recharge/mpay/getOperationUrl
+POST /v1/act-web/welfare/xy/get-recent-rewardBag-list
+POST /v1/act-web/winPrizeLog/winPrizeList
+POST /v1/act//module/market/getMarketInfo
+POST /v1/act/actopen/common/getUniqueKey
+POST /v1/act/common/currency/getCurrencyInfo
+POST /v1/act/common/currency/getSpecialTimeExpireCurrency
+POST /v1/act/common/currency/listCurrencyLog4CommonCoin
+POST /v1/act/floatFrame/addUsedNum
+POST /v1/act/floatFrame/getInfos
+POST /v1/act/module/book/multiBookInfo
+POST /v1/act/module/common/actInfo
+POST /v1/act/module/common/bindRole
+POST /v1/act/module/common/getAccount
+POST /v1/act/module/common/verifyUrsSms
+POST /v1/act/module/helpRechargeMilestone/draw
+POST /v1/act/module/helpRechargeMilestone/info
+POST /v1/act/module/l33/miniGame/getTodayProcess
+POST /v1/act/module/l33/miniGame/getToken
+POST /v1/act/module/luckDraw/draw
+POST /v1/act/module/luckDraw/drawByCommonCoin
+POST /v1/act/module/luckDraw/getMultiLuckDrawInfo
+POST /v1/act/module/luckDraw/luckDrawInfo
+POST /v1/act/module/luckDraw/multiDraw
+POST /v1/act/module/luckDraw/multiDrawByCommonCoin
+POST /v1/act/module/market/exchangePrize
+POST /v1/act/module/market/getAllExchangeGoodsTab
+POST /v1/act/module/market/getExchangeDetail
+POST /v1/act/module/market/getExchangeListV2_complexFilter
+POST /v1/act/module/seizeTreasure/info
+POST /v1/act/module/seizeTreasure/putIn
+POST /v1/act/module/seizeTreasure/winnersLog
+POST /v1/act/module/signupDraw/signup
+POST /v1/act/module/signupDraw/signupDrawInfos
+POST /v1/act/module/signupDraw/winners
+POST /v1/act/module/task/applyTaskPrize
+POST /v1/act/module/task/doActTask
+POST /v1/act/module/task/doCommonBookTask
+POST /v1/act/module/task/doMultiActTask
+POST /v1/act/module/task/taskInfo
+POST /v1/act/pageConf/commonAppConfig
+POST /v1/act/recharge/getFirstRechargeTime
+POST /v1/act/recharge/mpay/getOperationUrl
+POST /v1/act/winPrizeLog/winPrizeList
+POST /v1/app/gameCenter/gameList/V2
+POST /v1/exp/new-user-coupon/acquire
+POST /v1/exp/new-user-coupon/check-order-record
+POST /v1/exp/new-user-coupon/list
+POST /v1/exp/xy/coupon-filter-strategy/show
+POST /v1/exp/xy/game-wchat-config/suggest-list
+POST /v1/web/exp/new-user-coupon/acquire
+POST /v1/web/exp/new-user-coupon/check-order-record
+POST /v1/web/exp/new-user-coupon/list
+POST /v1/web/exp/square-user/sign-in
+POST /v1/web/exp/week-coupon/acquire
+POST /v1/web/exp/week-coupon/showing-list-v2
+POST /v1/web/exp/xy/coupon-filter-strategy/show
+POST /v1/web/exp/xy/game-wchat-config/suggest-list
+POST /v1/web/game/appInfo/getAll
+POST /v1/welfare/xy/get-recent-rewardBag-list
+https://act.ds.163.com/f45d07301253175a/
+https://inf-act-test.ds.163.com
+https://inf-act.ds.163.com
