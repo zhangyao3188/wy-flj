@@ -13,7 +13,7 @@ import {
   patchLevel,
   deleteLevel,
 } from '@/api/accounts'
-import { fmtTime, levelRank, buildVipStats, vipStatEntries } from '@/utils/format'
+import { fmtTime, levelRank, buildVipStats, vipStatEntries, formatTodaySuccessByLevel, formatAccountTodayLevels } from '@/utils/format'
 
 const loading = ref(false)
 const checkLoading = ref(false)
@@ -23,7 +23,14 @@ const successLogsCache = ref([])
 const onlineCheckMap = ref(new Map())
 const filterMobile = ref('')
 const filterStatus = ref('active')
-const todayMeta = ref({ day: '', orders: 0, suspectedOrders: 0, welfareOrders: 0, accounts: 0 })
+const todayMeta = ref({
+  day: '',
+  orders: 0,
+  suspectedOrders: 0,
+  welfareOrders: 0,
+  accounts: 0,
+  byLevel: {},
+})
 
 const editSaving = ref(false)
 const addLevelSaving = ref(false)
@@ -115,6 +122,8 @@ const statsChips = computed(() => {
     chips.push({ label: '当前显示', value: filtered, suffix: '个账号' })
   }
   let todaySuffix = `笔 / ${todayMeta.value.accounts || 0} 账号`
+  const levelSummary = formatTodaySuccessByLevel(todayMeta.value.byLevel)
+  if (levelSummary) todaySuffix = `（${levelSummary}）` + todaySuffix
   if (todayMeta.value.welfareOrders) todaySuffix = `（福 ${todayMeta.value.welfareOrders}）` + todaySuffix
   if (todayMeta.value.suspectedOrders) todaySuffix = `（疑 ${todayMeta.value.suspectedOrders}）` + todaySuffix
   chips.push({ label: '今日成功', value: todayMeta.value.orders || 0, suffix: todaySuffix })
@@ -128,9 +137,11 @@ const successSub = computed(() => {
   const extraParts = []
   if (welfareN > 0) extraParts.push(`福利 ${welfareN}`)
   if (suspectedN > 0) extraParts.push(`疑似 ${suspectedN}`)
-  const base = `共 ${successLogsCache.value.length} 笔 · ${todayMeta.value.accounts || 0} 个账号`
+  const levelSummary = formatTodaySuccessByLevel(todayMeta.value.byLevel)
+  const levelPart = levelSummary ? ` · 按等级 ${levelSummary}` : ''
+  const base = `共 ${successLogsCache.value.length} 笔 · ${todayMeta.value.accounts || 0} 个账号${levelPart}`
   return extraParts.length
-    ? `共 ${successLogsCache.value.length} 笔（含${extraParts.join('、')}）· ${todayMeta.value.accounts || 0} 个账号`
+    ? `共 ${successLogsCache.value.length} 笔（含${extraParts.join('、')}）· ${todayMeta.value.accounts || 0} 个账号${levelPart}`
     : base
 })
 
@@ -160,14 +171,20 @@ function successKindLabel(l) {
 
 function todaySuccessDisplay(a) {
   const total = a.todaySuccessCount || 0
-  if (!total) return '0'
+  if (!total) return { main: '0', extras: [], levels: '', warn: false }
   const suspected = a.todaySuspectedCount || 0
   const welfare = a.todayWelfareCount || 0
   const confirmed = total - suspected - welfare
   const extras = []
   if (welfare > 0) extras.push(`福${welfare}`)
   if (suspected > 0) extras.push(`疑${suspected}`)
-  return { main: confirmed > 0 ? confirmed : total, extras, warn: confirmed <= 0 && extras.length > 0 }
+  const levels = formatAccountTodayLevels(a.todaySuccessByLevel)
+  return {
+    main: confirmed > 0 ? confirmed : total,
+    extras,
+    levels,
+    warn: confirmed <= 0 && extras.length > 0,
+  }
 }
 
 async function loadSuccessLogs() {
@@ -175,6 +192,7 @@ async function loadSuccessLogs() {
     const data = await listSuccessLogs()
     successLogsCache.value = data.logs || []
     if (data.day) todayMeta.value.day = data.day
+    if (data.byLevel) todayMeta.value.byLevel = data.byLevel
   } catch {
     successLogsCache.value = []
   }
@@ -191,6 +209,7 @@ async function loadAccounts() {
       suspectedOrders: accRes.todaySuspectedOrders || 0,
       welfareOrders: accRes.todayWelfareOrders || 0,
       accounts: accRes.todaySuccessAccounts || 0,
+      byLevel: accRes.todaySuccessByLevel || todayMeta.value.byLevel || {},
     }
   } catch (e) {
     ElMessage.error(e.message || String(e))
@@ -543,10 +562,11 @@ onMounted(loadAccounts)
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="今日成功" width="88">
+        <el-table-column label="今日成功" width="108">
           <template #default="{ row }">
             <template v-if="(row.todaySuccessCount || 0) > 0">
               <strong :class="todaySuccessDisplay(row).warn ? 'warn' : 'ok'">{{ todaySuccessDisplay(row).main }}</strong>
+              <div v-if="todaySuccessDisplay(row).levels" class="cell-sub">{{ todaySuccessDisplay(row).levels }}</div>
               <div v-if="todaySuccessDisplay(row).extras.length" class="cell-sub">+{{ todaySuccessDisplay(row).extras.join(' +') }}</div>
             </template>
             <span v-else>0</span>

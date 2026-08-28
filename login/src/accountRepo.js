@@ -207,6 +207,24 @@ CREATE TABLE IF NOT EXISTS seckill_success_logs (
   successLogSchemaEnsured = true;
 }
 
+function levelEntryFromRow(r) {
+  const total = Number(r.cnt) || 0;
+  const suspected = Number(r.suspected_cnt) || 0;
+  const welfare = Number(r.welfare_cnt) || 0;
+  const confirmed = Math.max(0, total - suspected - welfare);
+  return { total, confirmed, suspected, welfare };
+}
+
+function mergeLevelEntry(base, add) {
+  if (!base) return { ...add };
+  return {
+    total: base.total + add.total,
+    confirmed: base.confirmed + add.confirmed,
+    suspected: base.suspected + add.suspected,
+    welfare: base.welfare + add.welfare,
+  };
+}
+
 async function attachTodaySuccessCounts(users) {
   if (!users || !users.length) return users;
   await ensureSuccessLogSchema();
@@ -218,13 +236,14 @@ async function attachTodaySuccessCounts(users) {
   try {
     rows = await db.query(
       `SELECT account_id,
+              vip_level,
               COUNT(*) AS cnt,
               SUM(CASE WHEN kind = 'suspected' THEN 1 ELSE 0 END) AS suspected_cnt,
               SUM(CASE WHEN kind = 'welfare' THEN 1 ELSE 0 END) AS welfare_cnt
        FROM seckill_success_logs
        WHERE account_id IN (${placeholders})
          AND success_at >= ? AND success_at < ?
-       GROUP BY account_id`,
+       GROUP BY account_id, vip_level`,
       [...ids, start, end]
     );
   } catch (_) {
@@ -233,17 +252,54 @@ async function attachTodaySuccessCounts(users) {
   const countMap = new Map();
   const suspectedMap = new Map();
   const welfareMap = new Map();
+  const byLevelMap = new Map();
   for (const r of rows) {
-    countMap.set(Number(r.account_id), Number(r.cnt) || 0);
-    suspectedMap.set(Number(r.account_id), Number(r.suspected_cnt) || 0);
-    welfareMap.set(Number(r.account_id), Number(r.welfare_cnt) || 0);
+    const aid = Number(r.account_id);
+    const entry = levelEntryFromRow(r);
+    const levelKey = r.vip_level ? String(r.vip_level) : '未知';
+    countMap.set(aid, (countMap.get(aid) || 0) + entry.total);
+    suspectedMap.set(aid, (suspectedMap.get(aid) || 0) + entry.suspected);
+    welfareMap.set(aid, (welfareMap.get(aid) || 0) + entry.welfare);
+    if (!byLevelMap.has(aid)) byLevelMap.set(aid, {});
+    const bucket = byLevelMap.get(aid);
+    bucket[levelKey] = mergeLevelEntry(bucket[levelKey], entry);
   }
   for (const u of users) {
     u.todaySuccessCount = countMap.get(Number(u.id)) || 0;
     u.todaySuspectedCount = suspectedMap.get(Number(u.id)) || 0;
     u.todayWelfareCount = welfareMap.get(Number(u.id)) || 0;
+    u.todaySuccessByLevel = byLevelMap.get(Number(u.id)) || {};
   }
   return users;
+}
+
+/** 当日成功按等级汇总（全库） */
+async function getTodaySuccessByLevelSummary({ day = null } = {}) {
+  await ensureSuccessLogSchema();
+  const { start, end } = chinaDayRange(
+    day ? new Date(`${day}T12:00:00+08:00`) : new Date()
+  );
+  let rows = [];
+  try {
+    rows = await db.query(
+      `SELECT vip_level,
+              COUNT(*) AS cnt,
+              SUM(CASE WHEN kind = 'suspected' THEN 1 ELSE 0 END) AS suspected_cnt,
+              SUM(CASE WHEN kind = 'welfare' THEN 1 ELSE 0 END) AS welfare_cnt
+       FROM seckill_success_logs
+       WHERE success_at >= ? AND success_at < ?
+       GROUP BY vip_level`,
+      [start, end]
+    );
+  } catch (_) {
+    rows = [];
+  }
+  const byLevel = {};
+  for (const r of rows) {
+    const levelKey = r.vip_level ? String(r.vip_level) : '未知';
+    byLevel[levelKey] = levelEntryFromRow(r);
+  }
+  return byLevel;
 }
 
 /**
@@ -279,6 +335,7 @@ async function listSuccessLogs({ day = null, limit = 500 } = {}) {
   return {
     day: d,
     total: rows.length,
+    byLevel: await getTodaySuccessByLevelSummary({ day: d }),
     logs: rows.map((r) => ({
       id: r.id,
       accountId: r.account_id,
@@ -1011,6 +1068,7 @@ function toPublicAccount(user) {
     todaySuccessCount: Number(user.todaySuccessCount) || 0,
     todaySuspectedCount: Number(user.todaySuspectedCount) || 0,
     todayWelfareCount: Number(user.todayWelfareCount) || 0,
+    todaySuccessByLevel: user.todaySuccessByLevel || {},
     lastSuccessAt: user.lastSuccessAt || null,
     completed:
       levels.length > 0
@@ -1339,6 +1397,7 @@ module.exports = {
   listActiveAccounts,
   listAllAccounts,
   listSuccessLogs,
+  getTodaySuccessByLevelSummary,
   chinaDayRange,
   ensureSuccessLogSchema,
   updateAccount,

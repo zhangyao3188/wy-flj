@@ -308,6 +308,7 @@ app.get('/api/accounts', async (req, res) => {
       0
     );
     const todaySuccessAccounts = accounts.filter((a) => (a.todaySuccessCount || 0) > 0).length;
+    const todaySuccessByLevel = await accountRepo.getTodaySuccessByLevelSummary();
     res.json({
       ok: true,
       total: accounts.length,
@@ -316,6 +317,7 @@ app.get('/api/accounts', async (req, res) => {
       todaySuspectedOrders,
       todayWelfareOrders,
       todaySuccessAccounts,
+      todaySuccessByLevel,
       today: accountRepo.chinaDayRange().day,
       accounts,
     });

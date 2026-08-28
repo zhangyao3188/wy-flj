@@ -31,3 +31,48 @@ export function vipStatEntries(vipStats) {
     return String(a[0]).localeCompare(String(b[0]))
   })
 }
+
+/** 今日成功按等级汇总文案，如 V4 2 · V5 3 */
+export function formatTodaySuccessByLevel(byLevel, { countField = 'total' } = {}) {
+  if (!byLevel || typeof byLevel !== 'object') return ''
+  const keys = Object.keys(byLevel).sort((a, b) => {
+    const na = levelRank(a)
+    const nb = levelRank(b)
+    if (na !== nb) return na - nb
+    return String(a).localeCompare(String(b))
+  })
+  const parts = keys
+    .map((lv) => {
+      const entry = byLevel[lv]
+      const n =
+        typeof entry === 'number'
+          ? entry
+          : entry && entry[countField] != null
+            ? Number(entry[countField])
+            : entry && entry.total != null
+              ? Number(entry.total)
+              : 0
+      return n > 0 ? `${lv} ${n}` : null
+    })
+    .filter(Boolean)
+  return parts.join(' · ')
+}
+
+/** 单账号今日成功等级明细，如 V5×1 · V6×2 */
+export function formatAccountTodayLevels(byLevel) {
+  if (!byLevel || typeof byLevel !== 'object') return ''
+  const keys = Object.keys(byLevel).sort((a, b) => {
+    const na = levelRank(a)
+    const nb = levelRank(b)
+    if (na !== nb) return na - nb
+    return String(a).localeCompare(String(b))
+  })
+  const parts = keys
+    .map((lv) => {
+      const entry = byLevel[lv]
+      const n = entry && entry.total != null ? Number(entry.total) : 0
+      return n > 0 ? `${lv}×${n}` : null
+    })
+    .filter(Boolean)
+  return parts.join(' · ')
+}
