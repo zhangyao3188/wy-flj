@@ -11,11 +11,12 @@ import {
 
 const route = useRoute()
 const token = ref(String(route.query.token || ''))
-const statusText = ref('加载中…')
+const statusText = ref('正在准备登录画面…')
 const statusType = ref('')
 const typeBox = ref('')
 const mobileHint = ref('')
 const frameSrc = ref('')
+const frameReady = ref(false)
 const clickBusy = ref(false)
 const extractLoading = ref(false)
 const done = ref(false)
@@ -34,7 +35,24 @@ function canInteract() {
 
 function refreshFrame() {
   if (!token.value || clickBusy.value || done.value) return
-  frameSrc.value = sessionFrameUrl(token.value)
+  const url = sessionFrameUrl(token.value)
+  // 用 fetch 探测，避免 204 把 img 打成裂图
+  fetch(url, { cache: 'no-store' })
+    .then(async (res) => {
+      if (!res.ok || res.status === 204) return
+      const blob = await res.blob()
+      if (!blob || !blob.size) return
+      const prev = frameSrc.value
+      frameSrc.value = URL.createObjectURL(blob)
+      frameReady.value = true
+      if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev)
+    })
+    .catch(() => {})
+}
+
+function onFrameLoad() {
+  const img = document.getElementById('session-frame')
+  if (img?.naturalWidth > 0) frameReady.value = true
 }
 
 function mapPoint(ev, frame) {
@@ -190,6 +208,9 @@ onMounted(async () => {
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
   if (pollTimer) clearTimeout(pollTimer)
+  if (frameSrc.value && frameSrc.value.startsWith('blob:')) {
+    URL.revokeObjectURL(frameSrc.value)
+  }
 })
 </script>
 
@@ -217,14 +238,17 @@ onUnmounted(() => {
       </div>
     </el-card>
 
-    <div class="screen-wrap">
+    <div class="screen-wrap" v-loading="!frameReady && !done" element-loading-text="正在启动浏览器与登录页…">
       <img
+        v-show="frameReady"
         id="session-frame"
         :src="frameSrc"
         alt="登录画面"
         draggable="false"
+        @load="onFrameLoad"
         @pointerup="onPointerUp"
       />
+      <div v-if="!frameReady && !done" class="frame-placeholder" aria-hidden="true" />
     </div>
     <p class="tip">若画面只有「请先登录」、点登录无反应，请点「打开登录框」。账号密码登录后点「提取并入库」。</p>
   </div>
@@ -250,12 +274,19 @@ onUnmounted(() => {
 .row .el-input { flex: 1; min-width: 160px; }
 .extract-btn { min-width: 140px; }
 .screen-wrap {
+  position: relative;
+  min-height: min(52vh, 420px);
   border: 1px solid var(--el-border-color);
   border-radius: 12px;
   overflow: hidden;
   background: #fff;
   display: flex;
   justify-content: center;
+}
+.frame-placeholder {
+  width: 100%;
+  min-height: min(52vh, 420px);
+  background: linear-gradient(180deg, #f5f7fa 0%, #eef1f6 100%);
 }
 #session-frame {
   width: 100%;

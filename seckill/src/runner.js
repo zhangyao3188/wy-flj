@@ -673,13 +673,19 @@ async function fireLoop(client, ready, target, options = {}) {
       if (isSessionExpired(resp)) {
         if (!refreshedOn873) {
           refreshedOn873 = true;
-          console.warn(`${tag}[seckill] 抢购中会话过期(873)，尝试 cookie-exchange…`);
+          console.warn(`${tag}[seckill] 抢购中会话过期(873)，尝试刷新会话（cookie-exchange + nlogin）…`);
           try {
             await cookieExchange(client);
             if (jar) await ensureXsrf(client, jar);
+            await ensureSession(client).catch(() => null);
+            // 换票后再换一次，确保代理出口上的 JSESSIONID / plutus 齐套
+            await cookieExchange(client).catch(() => null);
+            if (jar) await ensureXsrf(client, jar);
             if (jar && user) await persistCookies(user, jar, tag);
+            // 下一枪重新组包，避免沿用过期会话下的预组装状态
+            if (options) options.preparedAcquire = undefined;
           } catch (e) {
-            console.warn(`${tag}[seckill] cookie-exchange 失败: ${e.message || e}`);
+            console.warn(`${tag}[seckill] 会话刷新失败: ${e.message || e}`);
           }
         } else {
           console.error(`${tag}[seckill] 刷新后仍 873，停止该账号（需重新登录）`);

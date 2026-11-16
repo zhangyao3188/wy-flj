@@ -91,6 +91,62 @@ function readCookie(jar, name) {
 }
 
 /**
+ * axios-cookiejar-support 禁止自定义 http(s)Agent。
+ * 走代理时改为拦截器手动读写 CookieJar。
+ */
+function readSetCookieHeaders(headers) {
+  if (!headers) return [];
+  if (typeof headers.getSetCookie === 'function') {
+    try {
+      const list = headers.getSetCookie();
+      if (Array.isArray(list) && list.length) return list;
+    } catch (_) {}
+  }
+  const raw = headers['set-cookie'] || headers['Set-Cookie'];
+  if (!raw) return [];
+  return Array.isArray(raw) ? raw : [raw];
+}
+
+async function storeSetCookies(jar, url, headers) {
+  if (!jar || !url) return;
+  const list = readSetCookieHeaders(headers);
+  for (const raw of list) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await jar.setCookie(String(raw), url);
+    } catch (_) {}
+  }
+}
+
+function attachManualCookieJar(client, jar) {
+  client.interceptors.request.use(async (config) => {
+    const url = buildUrl(config);
+    try {
+      const cookie = await jar.getCookieString(url);
+      if (cookie) {
+        config.headers = config.headers || {};
+        config.headers.Cookie = cookie;
+      }
+    } catch (_) {}
+    return config;
+  });
+
+  client.interceptors.response.use(
+    async (response) => {
+      await storeSetCookies(jar, buildUrl(response.config || {}), response.headers);
+      return response;
+    },
+    async (error) => {
+      const resp = error && error.response;
+      if (resp) {
+        await storeSetCookies(jar, buildUrl(resp.config || {}), resp.headers);
+      }
+      return Promise.reject(error);
+    }
+  );
+}
+
+/**
  * 与前端 axios 拦截器一致：
  * GL-CheckSum = SHA1(JSON.stringify(body) + GL-X-XSRF-TOKEN)
  */
@@ -332,24 +388,45 @@ function createClientFromUser(user) {
   }
 
   const deviceId = user.deviceId || uuidv4();
-  const client = wrapper(
-    axios.create({
-      jar,
-      withCredentials: true,
-      timeout: 15000,
-      headers: {
-        'User-Agent': UA,
-        Accept: 'application/json, text/plain, */*',
-        Origin: PAY_ORIGIN,
-        Referer: `${PAY_ORIGIN}/`,
-        'Content-Type': 'application/json;charset=UTF-8',
-        'GL-ClientType': '60',
-        'GL-DeviceId': deviceId,
-        ...(user.godUuid ? { 'GL-Uid': user.godUuid } : {}),
-      },
-      validateStatus: () => true,
-    })
-  );
+  let proxyAgent = user.proxyAgent || null;
+  if (!proxyAgent && user.proxyUrl) {
+    const { HttpsProxyAgent } = require('https-proxy-agent');
+    proxyAgent = new HttpsProxyAgent(user.proxyUrl);
+  }
+  const useProxy = !!proxyAgent;
+
+  const axiosConfig = {
+    timeout: 15000,
+    headers: {
+      'User-Agent': UA,
+      Accept: 'application/json, text/plain, */*',
+      Origin: PAY_ORIGIN,
+      Referer: `${PAY_ORIGIN}/`,
+      'Content-Type': 'application/json;charset=UTF-8',
+      'GL-ClientType': '60',
+      'GL-DeviceId': deviceId,
+      ...(user.godUuid ? { 'GL-Uid': user.godUuid } : {}),
+    },
+    validateStatus: () => true,
+    // 禁用 axios 环境变量代理，改由下方显式 http(s)Agent 控制
+    proxy: false,
+  };
+
+  if (useProxy) {
+    // axios-cookiejar-support 不支持自定义 Agent，代理模式用手写 Cookie 拦截器
+    axiosConfig.httpAgent = proxyAgent;
+    axiosConfig.httpsAgent = proxyAgent;
+    axiosConfig.withCredentials = false;
+  } else {
+    axiosConfig.jar = jar;
+    axiosConfig.withCredentials = true;
+  }
+
+  const raw = axios.create(axiosConfig);
+  const client = useProxy ? raw : wrapper(raw);
+  if (useProxy) {
+    attachManualCookieJar(client, jar);
+  }
 
   attachGlHeaders(client, jar, { deviceId, godUuid: user.godUuid });
   const logWriter = createLogWriter(user.mobile);
@@ -417,6 +494,19 @@ function isSuspectedAcquire(resp) {
   return /已经领取过本轮福利金/.test(msg);
 }
 
+/** 同名 Cookie 优先保留更具体域名（避免切代理重建 client 时吃到过期的 .163.com JSESSIONID → 873） */
+function cookieDomainScore(domain) {
+  const d = String(domain || '')
+    .replace(/^\./, '')
+    .toLowerCase();
+  if (!d) return 0;
+  if (d === 'inf.ds.163.com' || d === 'pay.ds.163.com' || d === 'pay-api.ds.163.com') return 4;
+  if (d === 'ds.163.com') return 3;
+  if (d.endsWith('.ds.163.com')) return 2;
+  if (d === '163.com') return 1;
+  return 0;
+}
+
 function jarToCookieList(jar) {
   const map = new Map();
   for (const url of [
@@ -428,12 +518,16 @@ function jarToCookieList(jar) {
     try {
       for (const c of jar.getCookiesSync(url)) {
         if (!c || !c.key) continue;
-        map.set(c.key, {
+        const next = {
           name: c.key,
           value: c.value,
           domain: c.domain || '.ds.163.com',
           path: c.path || '/',
-        });
+        };
+        const prev = map.get(c.key);
+        if (!prev || cookieDomainScore(next.domain) >= cookieDomainScore(prev.domain)) {
+          map.set(c.key, next);
+        }
       }
     } catch (_) {}
   }

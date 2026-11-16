@@ -86,6 +86,15 @@ app.get('/api/login/session/:token/frame', async (req, res) => {
   if (!remote || remote.status === 'success' || remote.status === 'failed') {
     return res.status(404).end();
   }
+  // 浏览器尚未就绪时不要触发截图，直接 204，让前端继续转圈
+  if (!remote.page || remote.status === 'pending' || remote.status === 'starting') {
+    if (remote.lastFrame) {
+      res.set('Content-Type', 'image/jpeg');
+      res.set('Cache-Control', 'no-store');
+      return res.send(remote.lastFrame);
+    }
+    return res.status(204).end();
+  }
   const buf = (await remote.refreshFrame()) || remote.lastFrame;
   if (!buf) return res.status(204).end();
   res.set('Content-Type', 'image/jpeg');
@@ -95,7 +104,13 @@ app.get('/api/login/session/:token/frame', async (req, res) => {
 
 app.post('/api/login/session/:token/input', async (req, res) => {
   const remote = manager.get(req.params.token);
-  if (!remote || remote.status !== 'running') {
+  if (!remote) {
+    return res.status(400).json({ ok: false, message: '会话不可用' });
+  }
+  if (remote.status === 'pending' || remote.status === 'starting' || !remote.page) {
+    return res.status(400).json({ ok: false, message: '浏览器启动中，请稍候再操作' });
+  }
+  if (remote.status !== 'running') {
     return res.status(400).json({ ok: false, message: '会话不可用' });
   }
   try {

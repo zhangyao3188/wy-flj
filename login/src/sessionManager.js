@@ -315,6 +315,10 @@ class RemoteLoginSession {
   }
 
   async start() {
+    if (this._closed) return;
+    this.status = 'starting';
+    this.message = '正在启动浏览器…';
+
     const { chromium } = require('playwright');
     const launchOpts = {
       headless: true,
@@ -324,6 +328,10 @@ class RemoteLoginSession {
       this.browser = await chromium.launch({ ...launchOpts, channel: 'chrome' });
     } catch (_) {
       this.browser = await chromium.launch(launchOpts);
+    }
+    if (this._closed) {
+      await this.close();
+      return;
     }
     this.context = await this.browser.newContext({
       viewport: this.viewport,
@@ -335,22 +343,25 @@ class RemoteLoginSession {
       locale: 'zh-CN',
     });
     this.page = await this.context.newPage();
-    this.status = 'running';
-    this.message = '请在下方画面中完成登录（网页版：手机号 / 验证码 / 账号密码 / 滑块）';
+    this.message = '正在打开登录页…';
 
+    // 用 domcontentloaded，避免 networkidle 等静态资源拖很久
     await this.page.goto('https://pay.ds.163.com/login', {
-      waitUntil: 'networkidle',
-      timeout: 60000,
-    }).catch(async () => {
-      await this.page.goto('https://pay.ds.163.com/login', {
-        waitUntil: 'domcontentloaded',
-        timeout: 60000,
-      });
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
     });
-    await this.page.waitForTimeout(1500);
-    for (let i = 0; i < 5; i++) {
+    if (this._closed) return;
+
+    this.status = 'running';
+    this.message = '页面已打开，正在唤起登录框…';
+    // 尽早出一帧，会话页不用干等弹窗
+    await this.refreshFrame();
+
+    await this.page.waitForTimeout(400);
+    for (let i = 0; i < 3; i++) {
+      if (this._closed) return;
       if (await this.openLoginDialog()) break;
-      await this.page.waitForTimeout(800);
+      await this.page.waitForTimeout(400);
     }
     // 尽量把登录框滚到可视区域中心
     try {
@@ -362,6 +373,7 @@ class RemoteLoginSession {
         if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', inline: 'center' });
       });
     } catch (_) {}
+    this.message = '请在下方画面中完成登录（网页版：手机号 / 验证码 / 账号密码 / 滑块）';
     await this.refreshFrame();
     this._watchTimer = setInterval(() => {
       this._pollSuccess().catch(() => {});
@@ -997,28 +1009,37 @@ class SessionManager {
     });
 
     const remote = new RemoteLoginSession(token, quota, buyer);
+    remote.status = 'pending';
+    remote.message = '正在启动浏览器与登录页，请稍候…';
     this.sessions.set(token, remote);
-    try {
-      await remote.start();
-      await accountRepo.updateLoginSession(token, {
-        status: 'running',
-        message: remote.message,
-      });
-    } catch (e) {
-      remote.status = 'failed';
-      remote.message = e.message || String(e);
-      await accountRepo.updateLoginSession(token, {
-        status: 'failed',
-        message: remote.message,
-      });
-      await remote.close();
-      this.sessions.delete(token);
-      throw e;
-    }
 
     setTimeout(() => {
       this.expire(token).catch(() => {});
     }, ttl);
+
+    // 先返回 token，浏览器启动放到后台，避免前端卡在「开始登录」
+    remote
+      .start()
+      .then(async () => {
+        if (remote._closed || remote.status === 'failed') return;
+        await accountRepo.updateLoginSession(token, {
+          status: remote.status === 'running' ? 'running' : remote.status,
+          message: remote.message,
+        });
+      })
+      .catch(async (e) => {
+        remote.status = 'failed';
+        remote.message = e.message || String(e);
+        try {
+          await accountRepo.updateLoginSession(token, {
+            status: 'failed',
+            message: remote.message,
+          });
+        } catch (_) {}
+        await remote.close();
+        this.sessions.delete(token);
+        console.error(`[login] session ${token} start failed:`, remote.message);
+      });
 
     return remote;
   }

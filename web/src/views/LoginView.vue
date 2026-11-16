@@ -40,10 +40,10 @@ async function startLogin() {
       targetCount: readTarget(targetCount.value),
       buyerNickname: buyerNickname.value.trim(),
     })
-    await router.push({ name: 'session', query: { token: data.token } })
+    // 立刻进入会话页；浏览器启动在后端异步进行
+    await router.replace({ name: 'session', query: { token: data.token } })
   } catch (e) {
     ElMessage.error(e.message || String(e))
-  } finally {
     loading.value = false
   }
 }
