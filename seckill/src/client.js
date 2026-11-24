@@ -638,11 +638,34 @@ function collectLevelCandidates(listResult, vipLevel) {
   return candidates;
 }
 
+const LIVE_STATUSES = ['PROGRESSING', 'UN_ACQUIRED', 'OUT_OF_STOCK'];
+
+function pickLiveCandidates(candidates) {
+  return candidates
+    .filter((c) => LIVE_STATUSES.includes(c.status))
+    .sort((a, b) => {
+      // 优先进行中；同状态取开始时间最近的一场
+      const ra = a.status === 'PROGRESSING' ? 0 : 1;
+      const rb = b.status === 'PROGRESSING' ? 0 : 1;
+      if (ra !== rb) return ra - rb;
+      return (b.seckillStartTime || 0) - (a.seckillStartTime || 0);
+    });
+}
+
 /**
  * 按会员等级选品：
- * 取该等级下全部 NOT_STARTED，选 seckillStartTime 最近（即将开抢）的一场预备。
+ * - 默认：取该等级下 NOT_STARTED，选 seckillStartTime 最近（即将开抢）的一场
+ * - preferLive：优先当前已开启场次（PROGRESSING / UN_ACQUIRED / OUT_OF_STOCK）
+ * 第三参可为 nowMs 数字，或 { nowMs, preferLive }
  */
-function pickTargetByVip(listResult, vipLevel, nowMsArg = nowMs()) {
+function pickTargetByVip(listResult, vipLevel, nowOrOpts = nowMs()) {
+  const opts =
+    nowOrOpts != null && typeof nowOrOpts === 'object' && !Array.isArray(nowOrOpts)
+      ? nowOrOpts
+      : { nowMs: nowOrOpts };
+  const nowMsArg = Number.isFinite(Number(opts.nowMs)) ? Number(opts.nowMs) : nowMs();
+  const preferLive = !!(opts.preferLive || opts.live || opts.current);
+
   const level = normalizeLevel(vipLevel);
   const candidates = collectLevelCandidates(listResult, level);
 
@@ -650,12 +673,22 @@ function pickTargetByVip(listResult, vipLevel, nowMsArg = nowMs()) {
     return { target: null, reason: `未找到会员等级 ${level} 的秒杀商品`, candidates };
   }
 
+  if (preferLive) {
+    const live = pickLiveCandidates(candidates);
+    if (live.length) {
+      return {
+        target: live[0],
+        reason: `优先当前已开启场次 ${live[0].status}（seckillStartTime=${live[0].seckillStartTime}）`,
+        candidates,
+      };
+    }
+    // 无进行中场次时回退即将开抢，避免直接失败
+  }
+
   const notStarted = candidates.filter((c) => c.status === 'NOT_STARTED');
   if (!notStarted.length) {
     // 若已开抢，回退到当前可抢/进行中场次，便于调试
-    const live = candidates
-      .filter((c) => ['PROGRESSING', 'UN_ACQUIRED', 'OUT_OF_STOCK'].includes(c.status))
-      .sort((a, b) => a.seckillStartTime - b.seckillStartTime);
+    const live = pickLiveCandidates(candidates);
     if (live.length) {
       return {
         target: live[0],
@@ -673,7 +706,9 @@ function pickTargetByVip(listResult, vipLevel, nowMsArg = nowMs()) {
   if (upcoming.length) {
     return {
       target: upcoming[0],
-      reason: `使用最近一场 NOT_STARTED（seckillStartTime=${upcoming[0].seckillStartTime}）`,
+      reason: preferLive
+        ? `无进行中场次，回退最近 NOT_STARTED（seckillStartTime=${upcoming[0].seckillStartTime}）`
+        : `使用最近一场 NOT_STARTED（seckillStartTime=${upcoming[0].seckillStartTime}）`,
       candidates,
     };
   }
@@ -681,7 +716,9 @@ function pickTargetByVip(listResult, vipLevel, nowMsArg = nowMs()) {
   notStarted.sort((a, b) => a.seckillStartTime - b.seckillStartTime);
   return {
     target: notStarted[0],
-    reason: `使用最早 NOT_STARTED（无未来场次）`,
+    reason: preferLive
+      ? `无进行中场次，回退最早 NOT_STARTED（无未来场次）`
+      : `使用最早 NOT_STARTED（无未来场次）`,
     candidates,
   };
 }

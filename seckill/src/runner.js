@@ -331,9 +331,13 @@ async function persistCookies(user, jar, tag = '') {
  * 预热：xsrf → nlogin → cookie-exchange → showing-list → 预备参数
  * 抢购档位以库内配置为准，不再拉 get-info 同步等级。
  */
-async function warmupSession(account, { label = '预热' } = {}) {
+async function warmupSession(account, { label = '预热', preferLive = false } = {}) {
   const tag = `[${account.mobile}/${account.forceVipLevel || account.vipLevel || '?'}] `;
   const { client, jar, user } = account;
+  const livePrefer =
+    preferLive ||
+    !!(account && (account.preferLive || account._preferLive)) ||
+    false;
   console.log(`${tag}${label}开始…`);
 
   await ensureXsrf(client, jar);
@@ -403,7 +407,9 @@ async function warmupSession(account, { label = '预热' } = {}) {
     console.log(`${tag}${label}本任务抢购档=${seckillLevel}（库内配置）`);
   }
 
-  const { target, reason, candidates } = pickTargetByVip(listResult, seckillLevel);
+  const { target, reason, candidates } = pickTargetByVip(listResult, seckillLevel, {
+    preferLive: livePrefer,
+  });
   if (!target || !target.couponId || !Number.isFinite(target.seckillStartTime)) {
     throw new Error(`选品失败: ${reason}; candidates=${candidates.length}`);
   }
@@ -762,6 +768,12 @@ async function prepareAccount(mobile, options = {}) {
   }
 
   const { client, jar, logFile } = createClientFromUser(user);
+  const preferLive = !!(
+    options.preferLive ||
+    options.live ||
+    options.current ||
+    process.env.SECKILL_PREFER_LIVE === '1'
+  );
 
   const account = {
     mobile: user.mobile,
@@ -772,6 +784,7 @@ async function prepareAccount(mobile, options = {}) {
     levelId: user.levelId != null ? user.levelId : null,
     allConfiguredLevels: user.allConfiguredLevels || [vipLevel],
     isHighestConfiguredTask: user.isHighestConfiguredTask !== false,
+    preferLive,
     client,
     jar,
     logFile,
@@ -784,7 +797,7 @@ async function prepareAccount(mobile, options = {}) {
   };
 
   // 启动时预热一遍（含过期则更新 cookie）
-  await warmupSession(account, { label: '启动预热' });
+  await warmupSession(account, { label: '启动预热', preferLive });
 
   if (account.skipSeckill) {
     return account;
@@ -808,8 +821,18 @@ async function runSeckill(mobile, options = {}) {
   const warmupBeforeMs =
     options.warmupBeforeMs != null ? options.warmupBeforeMs : WARMUP_BEFORE_MS;
 
-  console.log(`[seckill] 用户=${mobile}${immediate ? ' [测试倒计时抢]' : ''}`);
-  const account = await prepareAccount(mobile, options);
+  const preferLive = !!(
+    options.preferLive ||
+    options.live ||
+    options.current ||
+    process.env.SECKILL_PREFER_LIVE === '1'
+  );
+  console.log(
+    `[seckill] 用户=${mobile}${immediate ? ' [测试倒计时抢]' : ''}${
+      preferLive ? ' [当前已开启场次]' : ''
+    }`
+  );
+  const account = await prepareAccount(mobile, { ...options, preferLive });
 
   if (account.skipSeckill) {
     console.log(`[seckill] 跳过: ${account.skipReason || '任务无需抢购'}`);
@@ -906,7 +929,10 @@ async function runSeckill(mobile, options = {}) {
     }
 
     if (nowMs() < fireAt) {
-      await warmupSession(account, { label: '开抢前预热' });
+      await warmupSession(account, {
+        label: '开抢前预热',
+        preferLive: !!account.preferLive,
+      });
       if (account.skipSeckill) {
         console.log(`[seckill] 跳过: ${account.skipReason || '任务无需抢购'}`);
         return {
@@ -1043,6 +1069,12 @@ function parseCliArgs(argv) {
     flags.has('--test') ||
     !!testStartAt ||
     process.env.SECKILL_IMMEDIATE === '1';
+  const preferLive =
+    flags.has('--live') ||
+    flags.has('--current') ||
+    flags.has('--progressing') ||
+    flags.has('-l') ||
+    process.env.SECKILL_PREFER_LIVE === '1';
   const mobile = positional[0] || process.env.MOBILE;
   if (process.env.SECKILL_MAX_ATTEMPTS && !Number.isFinite(maxAttempts)) {
     maxAttempts = Number(process.env.SECKILL_MAX_ATTEMPTS);
@@ -1050,23 +1082,28 @@ function parseCliArgs(argv) {
   return {
     mobile,
     immediate,
+    preferLive,
     maxAttempts: Number.isFinite(maxAttempts) ? maxAttempts : undefined,
     testStartAt: testStartAt || process.env.SECKILL_TEST_START_AT || undefined,
   };
 }
 
 if (require.main === module) {
-  const { mobile, immediate, maxAttempts, testStartAt } = parseCliArgs(process.argv);
+  const { mobile, immediate, preferLive, maxAttempts, testStartAt } = parseCliArgs(
+    process.argv
+  );
   if (!mobile) {
     console.error('用法:');
-    console.error('  npm run seckill -- <手机号>           # 预备后，开抢前100ms开火');
-    console.error('  npm run test:now -- <手机号>          # 测试：下一整分开火（秒≥50则下下整分）');
+    console.error('  npm run seckill -- <手机号>           # 预备后，开抢前开火');
+    console.error('  npm run test:now -- <手机号>          # 测试：下一整分抢即将开启场次');
+    console.error('  npm run test:live -- <手机号>         # 测试：下一整分抢当前已开启场次');
     console.error('  npm run test:now -- <手机号> --at 12:05:00');
     console.error('  npm run test:now -- <手机号> --at "2026-07-31 12:05:00"');
     process.exit(1);
   }
   runSeckill(mobile, {
     immediate,
+    preferLive,
     ...(Number.isFinite(maxAttempts) ? { maxAttempts } : {}),
     ...(testStartAt ? { testStartAt } : {}),
   })
@@ -1081,6 +1118,7 @@ if (require.main === module) {
         stockId: r.target && r.target.stockId,
         seckillStartTime: r.target && r.target.seckillStartTime,
         immediate,
+        preferLive,
         testStartAt,
       });
       process.exit(r.success ? 0 : 2);

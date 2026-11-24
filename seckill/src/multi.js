@@ -125,6 +125,12 @@ async function loadAccountsFromDb(mobilesFilter) {
 
 async function runMulti(options = {}) {
   const immediate = !!options.immediate;
+  const preferLive = !!(
+    options.preferLive ||
+    options.live ||
+    options.current ||
+    process.env.SECKILL_PREFER_LIVE === '1'
+  );
   const fireRange = resolveFireOffsetRange(options);
   const warmupBeforeMs =
     options.warmupBeforeMs != null ? options.warmupBeforeMs : WARMUP_BEFORE_MS;
@@ -141,7 +147,8 @@ async function runMulti(options = {}) {
       ? ' [测试指定时间]'
       : ' [测试下一整分]'
     : '';
-  console.log(`[dev] 账号数=${mobiles.length}${modeLabel}（按账号×等级展开）`);
+  const liveLabel = preferLive ? ' [当前已开启场次]' : '';
+  console.log(`[dev] 账号数=${mobiles.length}${modeLabel}${liveLabel}（按账号×等级展开）`);
   console.log(
     `[dev] 任务: ${users.map((u) => `${u.mobile}/${u.vipLevel}(${u.successCount}/${u.targetCount})`).join(', ')}`
   );
@@ -170,6 +177,7 @@ async function runMulti(options = {}) {
       try {
         const account = await prepareAccount(user.mobile, {
           ...options,
+          preferLive,
           user,
           vipLevel: user.forceVipLevel || user.vipLevel,
         });
@@ -216,7 +224,7 @@ async function runMulti(options = {}) {
       hour12: false,
     });
     console.log(
-      `[dev] ✓ ${a.mobile}/${a.vipLevel} ${a.nickname || ''} couponId=${a.ready.couponId} stockId=${a.ready.stockId}${a.ready._inferredStock ? '(推导)' : ''} start=${startAt} 偏移=${formatFireOffsetLabel(a.fireOffsetMs)}${a.alreadyAcquired ? ' [已领取]' : ''}`
+      `[dev] ✓ ${a.mobile}/${a.vipLevel} ${a.nickname || ''} couponId=${a.ready.couponId} stockId=${a.ready.stockId}${a.ready._inferredStock ? '(推导)' : ''} status=${(a.ready && a.ready.status) || (a.target && a.target.status) || '?'} start=${startAt} 偏移=${formatFireOffsetLabel(a.fireOffsetMs)}${a.alreadyAcquired ? ' [已领取]' : ''}${a.preferLive ? ' [live]' : ''}`
     );
     if (a.logFile) console.log(`[dev]   日志: ${a.logFile}`);
   }
@@ -348,7 +356,10 @@ async function runMulti(options = {}) {
           activePrepared.map(async (account) => {
             try {
               await withTimeout(
-                warmupSession(account, { label: '开抢前预热' }),
+                warmupSession(account, {
+                  label: '开抢前预热',
+                  preferLive: !!account.preferLive,
+                }),
                 perAccountMs,
                 `warmup-timeout(${perAccountMs}ms)`
               );
@@ -415,7 +426,10 @@ async function runMulti(options = {}) {
       activePrepared.map(async (account) => {
         try {
           await withTimeout(
-            warmupSession(account, { label: '测试预热' }),
+            warmupSession(account, {
+              label: '测试预热',
+              preferLive: !!account.preferLive,
+            }),
             testPerAccountMs,
             `warmup-timeout(${testPerAccountMs}ms)`
           );
@@ -584,9 +598,16 @@ function parseCliArgs(argv) {
     flagSet.has('--test') ||
     !!testStartAt ||
     process.env.SECKILL_IMMEDIATE === '1';
+  const preferLive =
+    flagSet.has('--live') ||
+    flagSet.has('--current') ||
+    flagSet.has('--progressing') ||
+    flagSet.has('-l') ||
+    process.env.SECKILL_PREFER_LIVE === '1';
   return {
     mobiles: positional.length ? positional : null,
     immediate,
+    preferLive,
     maxAttempts: Number.isFinite(maxAttempts) ? maxAttempts : undefined,
     testStartAt: testStartAt || process.env.SECKILL_TEST_START_AT || undefined,
   };
@@ -599,6 +620,7 @@ if (require.main === module) {
   runMulti({
     mobiles: cli.mobiles,
     immediate: cli.immediate,
+    preferLive: cli.preferLive,
     ...(cli.maxAttempts != null ? { maxAttempts: cli.maxAttempts } : {}),
     ...(cli.testStartAt ? { testStartAt: cli.testStartAt } : {}),
   })

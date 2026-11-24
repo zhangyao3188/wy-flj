@@ -9,6 +9,7 @@
     "start": "node src/index.js",
     "seckill": "node src/runner.js",
     "test:now": "node src/multi.js --now",
+    "test:live": "node src/multi.js --now --live",
     "run": "node src/multi.js",
     "sync:act": "node src/syncActAccount.js"
   },
